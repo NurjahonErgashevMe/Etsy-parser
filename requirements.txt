@@ -1,0 +1,19 @@
+# Основные зависимости
+beautifulsoup4>=4.12.0
+pandas>=2.1.0
+openpyxl>=3.1.0
+lxml>=4.9.0
+numpy>=1.24.0
+schedule>=1.2.0
+
+# Selenium и stealth для парсинга
+selenium>=4.15.0
+selenium-stealth>=1.0.6
+webdriver-manager>=4.0.0
+
+# Для будущих фич (пока не устанавливаем)
+# requests>=2.31.0  # Убрали, так как используем только браузер
+# python-telegram-bot>=20.0
+# google-api-python-client>=2.0.0
+# google-auth-httplib2>=0.1.0
+# google-auth-oauthlib>=1.0.0
