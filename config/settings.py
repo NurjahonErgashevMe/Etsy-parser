@@ -26,8 +26,8 @@ class AppConfig:
     google_sheets_credentials: str = ""
     
     # Настройки планировщика
-    scheduler_enabled: bool = False
-    check_interval_hours: int = 24
+    scheduler_enabled: bool = True
+    check_interval_hours: float = 1  # Каждые 30 минут
     
     etsy: EtsyConfig = None
     

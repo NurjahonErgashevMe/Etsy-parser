@@ -302,10 +302,6 @@ class DataService:
     def generate_mock_products(self) -> Dict[str, str]:
         """Выбирает случайные товары из статического набора моковых данных для магазина MockShop"""
 
-
-#  "new_products": {
-#     "6789012345": "https://www.etsy.com/listing/6789012345/scented-soy-candle"
-#   }
         # Статический набор моковых товаров
         static_mock_products = {
             "1234567890": "https://www.etsy.com/listing/1234567890/handmade-ceramic-mug",

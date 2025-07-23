@@ -92,7 +92,7 @@ class EtsyParser(BaseParser):
         
         # Закрываем браузер
         if self.browser_service:
-            # self.browser_service.close_browser()
+            self.browser_service.close_browser()
             self.browser_service = None
         
         return all_products

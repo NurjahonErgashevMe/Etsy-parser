@@ -180,6 +180,7 @@ Thumbs.db
 # Config files with sensitive data
 config_local.py
 .env.local
+credentials.json
 
 # Test files
 test_*.py
