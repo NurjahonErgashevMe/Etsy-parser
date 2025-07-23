@@ -369,7 +369,35 @@ class DataService:
             json.dump(results, f, ensure_ascii=False, indent=2)
         
         print(f"Результаты с новыми товарами сохранены в файл: {results_file}")
+        
+        # Сохраняем новые товары в Google Sheets
+        self.save_new_products_to_sheets(new_products)
+        
         return results_file
+    
+    def save_new_products_to_sheets(self, new_products: Dict[str, str]):
+        """Сохраняет новые товары в Google Sheets"""
+        if not new_products:
+            return
+        
+        # Проверяем, включена ли интеграция с Google Sheets
+        if hasattr(self.config, 'google_sheets_enabled') and self.config.google_sheets_enabled:
+            try:
+                from services.google_sheets_service import GoogleSheetsService
+                sheets_service = GoogleSheetsService(self.config)
+                
+                if sheets_service.enabled:
+                    sheets_service.add_new_products_to_sheets(
+                        self.config.google_sheets_spreadsheet_id,
+                        new_products,
+                        "Etsy Products"
+                    )
+                else:
+                    print("⚠️ Google Sheets не настроен, пропускаем сохранение новых товаров")
+            except Exception as e:
+                print(f"⚠️ Ошибка сохранения новых товаров в Google Sheets: {e}")
+        else:
+            print("📊 Google Sheets отключен в конфигурации")
     
     def delete_previous_parsing_folder(self) -> bool:
         """Удаляет предыдущую папку парсинга с повторными попытками"""
@@ -457,7 +485,28 @@ class DataService:
         return False
     
     def load_shop_urls(self, links_file: str = None) -> List[str]:
-        """Загружает список URL магазинов из файла"""
+        """Загружает список URL магазинов из Google Sheets или файла"""
+        # Сначала пытаемся загрузить из Google Sheets
+        if hasattr(self.config, 'google_sheets_enabled') and self.config.google_sheets_enabled:
+            try:
+                from services.google_sheets_service import GoogleSheetsService
+                sheets_service = GoogleSheetsService(self.config)
+                
+                if sheets_service.enabled:
+                    urls = sheets_service.load_shop_urls_from_sheets(
+                        self.config.google_sheets_spreadsheet_id,
+                        "Etsy Shops"
+                    )
+                    if urls:
+                        print(f"📊 Загружено {len(urls)} URL магазинов из Google Sheets")
+                        return urls
+                    else:
+                        print("⚠️ Google Sheets пуст, используем локальный файл")
+            except Exception as e:
+                print(f"⚠️ Ошибка загрузки из Google Sheets: {e}")
+                print("📁 Переключаемся на локальный файл")
+        
+        # Fallback на локальный файл
         if links_file is None:
             links_file = self.config.links_file
         
@@ -465,12 +514,12 @@ class DataService:
             with open(links_file, 'r', encoding='utf-8') as f:
                 urls = [line.strip() for line in f if line.strip() and not line.startswith('#')]
             
-            print(f"Загружено {len(urls)} URL магазинов")
+            print(f"📁 Загружено {len(urls)} URL магазинов из локального файла")
             return urls
             
         except FileNotFoundError:
-            print(f"Файл {links_file} не найден")
+            print(f"❌ Файл {links_file} не найден")
             return []
         except Exception as e:
-            print(f"Ошибка при чтении файла {links_file}: {e}")
+            print(f"❌ Ошибка при чтении файла {links_file}: {e}")
             return []

@@ -21,13 +21,15 @@ class AppConfig:
     output_dir: str = "output"
     logs_dir: str = "logs"
     
-    # Настройки для будущих фич
-    telegram_bot_token: str = ""
-    google_sheets_credentials: str = ""
+    # Google Sheets настройки
+    google_sheets_enabled: bool = True
+    google_sheets_credentials: str = "credentials.json"
+    google_sheets_spreadsheet_id: str = "1YT4JqyDd6s3n4MZVle2MxyrN9PDnHlmYxSsIhNUU6jY"
+    
     
     # Настройки планировщика
     scheduler_enabled: bool = True
-    check_interval_hours: float = 1  # Каждые 30 минут
+    check_interval_hours: float = 1
     
     etsy: EtsyConfig = None
     
@@ -35,5 +37,4 @@ class AppConfig:
         if self.etsy is None:
             self.etsy = EtsyConfig()
 
-# Глобальный экземпляр конфигурации
 config = AppConfig()
