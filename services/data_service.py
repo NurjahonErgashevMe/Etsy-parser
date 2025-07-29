@@ -299,52 +299,52 @@ class DataService:
         
         return new_products
     
-    def generate_mock_products(self) -> Dict[str, str]:
-        """Выбирает случайные товары из статического набора моковых данных для магазина MockShop"""
+    # def generate_mock_products(self) -> Dict[str, str]:
+    #     """Выбирает случайные товары из статического набора моковых данных для магазина MockShop"""
 
-        # Статический набор моковых товаров
-        static_mock_products = {
-            "1234567890": "https://www.etsy.com/listing/1234567890/handmade-ceramic-mug",
-            "2345678901": "https://www.etsy.com/listing/2345678901/vintage-leather-wallet",
-            "3456789012": "https://www.etsy.com/listing/3456789012/wooden-cutting-board",
-            "4567890123": "https://www.etsy.com/listing/4567890123/silver-pendant-necklace",
-            "5678901234": "https://www.etsy.com/listing/5678901234/cotton-tote-bag",
-            "6789012345": "https://www.etsy.com/listing/6789012345/scented-soy-candle"
-        }
+    #     # Статический набор моковых товаров
+    #     static_mock_products = {
+    #         "1234567890": "https://www.etsy.com/listing/1234567890/handmade-ceramic-mug",
+    #         "2345678901": "https://www.etsy.com/listing/2345678901/vintage-leather-wallet",
+    #         "3456789012": "https://www.etsy.com/listing/3456789012/wooden-cutting-board",
+    #         "4567890123": "https://www.etsy.com/listing/4567890123/silver-pendant-necklace",
+    #         "5678901234": "https://www.etsy.com/listing/5678901234/cotton-tote-bag",
+    #         "6789012345": "https://www.etsy.com/listing/6789012345/scented-soy-candle"
+    #     }
         
-        # Выбираем случайное количество товаров от 3 до 6
-        num_products = random.randint(3, 6)
+    #     # Выбираем случайное количество товаров от 3 до 6
+    #     num_products = random.randint(3, 6)
         
-        # Случайно выбираем товары из статического набора
-        selected_items = random.sample(list(static_mock_products.items()), num_products)
-        mock_products = dict(selected_items)
+    #     # Случайно выбираем товары из статического набора
+    #     selected_items = random.sample(list(static_mock_products.items()), num_products)
+    #     mock_products = dict(selected_items)
         
-        print(f"Выбрано {num_products} товаров из статического набора для магазина MockShop")
-        return mock_products
+    #     print(f"Выбрано {num_products} товаров из статического набора для магазина MockShop")
+    #     return mock_products
     
-    def add_mock_shop_to_results(self, all_shop_products: Dict[str, List[Product]]) -> Dict[str, List[Product]]:
-        """Добавляет моковый магазин MockShop к результатам ДО сравнения"""
-        # Генерируем моковые товары
-        mock_products_data = self.generate_mock_products()
+    # def add_mock_shop_to_results(self, all_shop_products: Dict[str, List[Product]]) -> Dict[str, List[Product]]:
+    #     """Добавляет моковый магазин MockShop к результатам ДО сравнения"""
+    #     # Генерируем моковые товары
+    #     mock_products_data = self.generate_mock_products()
         
-        # Создаем список Product объектов для MockShop
-        mock_products = []
-        for listing_id, url in mock_products_data.items():
-            product = Product(
-                listing_id=listing_id,
-                title=f"Mock Product {listing_id}",
-                url=url,
-                shop_name="MockShop",
-                price="25.00",
-                currency="USD"
-            )
-            mock_products.append(product)
+    #     # Создаем список Product объектов для MockShop
+    #     mock_products = []
+    #     for listing_id, url in mock_products_data.items():
+    #         product = Product(
+    #             listing_id=listing_id,
+    #             title=f"Mock Product {listing_id}",
+    #             url=url,
+    #             shop_name="MockShop",
+    #             price="25.00",
+    #             currency="USD"
+    #         )
+    #         mock_products.append(product)
         
-        # Добавляем MockShop к результатам
-        all_shop_products["MockShop"] = mock_products
-        print(f"Добавлен моковый магазин MockShop с {len(mock_products)} товарами")
+    #     # Добавляем MockShop к результатам
+    #     all_shop_products["MockShop"] = mock_products
+    #     print(f"Добавлен моковый магазин MockShop с {len(mock_products)} товарами")
         
-        return all_shop_products
+    #     return all_shop_products
     
     def save_results_with_new_products(self, all_shop_products: Dict[str, List[Product]], new_products: Dict[str, str]) -> str:
         """Сохраняет результаты с информацией о новых товарах в папку текущего сеанса парсинга"""

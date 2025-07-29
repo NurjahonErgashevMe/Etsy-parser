@@ -29,7 +29,7 @@ class AppConfig:
     
     # Настройки планировщика
     scheduler_enabled: bool = True
-    check_interval_hours: float = 1
+    # Планировщик запускается каждый день в 4:00 МСК
     
     etsy: EtsyConfig = None
     

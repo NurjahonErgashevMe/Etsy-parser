@@ -4,6 +4,7 @@
 import schedule
 import time
 import logging
+import pytz
 from datetime import datetime
 from core.monitor import EtsyMonitor
 from config.settings import config
@@ -31,10 +32,14 @@ class EtsyScheduler:
             logging.info("Планировщик отключен в конфигурации")
             return
         
-        # Настраиваем расписание
-        schedule.every(config.check_interval_hours).hours.do(self.scheduled_job)
+        # Настраиваем расписание на 4:00 МСК каждый день
+        moscow_tz = pytz.timezone('Europe/Moscow')
+        schedule.every().day.at("04:00").do(self.scheduled_job)
         
-        logging.info(f"Планировщик запущен. Интервал: {config.check_interval_hours} часов")
+        # Показываем текущее время в МСК
+        moscow_time = datetime.now(moscow_tz)
+        logging.info(f"Планировщик запущен. Запуск каждый день в 4:00 МСК")
+        logging.info(f"Текущее время МСК: {moscow_time.strftime('%Y-%m-%d %H:%M:%S')}")
         logging.info(f"Следующий запуск: {schedule.next_run()}")
         
         self.is_running = True
@@ -55,3 +60,30 @@ class EtsyScheduler:
         """Останавливает планировщик"""
         self.is_running = False
         logging.info("Планировщик остановлен")
+
+def setup_logging():
+    """Настройка логирования"""
+    import os
+    
+    # Создаём папку для логов
+    os.makedirs(config.logs_dir, exist_ok=True)
+    
+    # Настраиваем логирование
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(os.path.join(config.logs_dir, 'scheduler.log'), encoding='utf-8'),
+            logging.StreamHandler()
+        ]
+    )
+
+if __name__ == "__main__":
+    setup_logging()
+    
+    print("🚀 Запуск планировщика Etsy мониторинга")
+    print("📅 Расписание: каждый день в 4:00 МСК")
+    print("⏹️  Для остановки нажмите Ctrl+C")
+    
+    scheduler = EtsyScheduler()
+    scheduler.start_scheduler()

@@ -91,21 +91,24 @@ class GoogleSheetsService:
             # Получаем текущее время
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
-            # Подготавливаем данные для добавления
             rows_to_add = []
             for listing_id, url in new_products.items():
                 rows_to_add.append([url, current_time])
             
-            # Находим первую пустую строку
-            existing_values = worksheet.col_values(1)
-            next_row = len(existing_values) + 1
+            existing_data = worksheet.get_all_values()[1:]  
+
+            all_data = rows_to_add + existing_data
             
-            # Добавляем новые строки
-            if rows_to_add:
-                range_name = f'A{next_row}:B{next_row + len(rows_to_add) - 1}'
-                worksheet.update(range_name, rows_to_add)
+            if all_data:
+                # Очищаем данные начиная со второй строки
+                worksheet.batch_clear([f'A2:B{len(existing_data) + len(rows_to_add) + 1}'])
                 
-                print(f"✅ Добавлено {len(rows_to_add)} новых товаров в Google Sheets")
+                # Записываем все данные (новые сверху)
+                range_name = f'A2:B{len(all_data) + 1}'
+                worksheet.update(range_name, all_data)
+                
+                print(f"✅ Добавлено {len(rows_to_add)} новых товаров в Google Sheets (сверху)")
+                print(f"📊 Общее количество записей: {len(all_data)}")
                 print(f"📊 Диапазон: {range_name}")
             
         except Exception as e:

@@ -111,10 +111,10 @@ class EtsyMonitor:
             print("❌ Не удалось получить данные ни от одного магазина")
             return
         
-        print(f"\n=== ДОБАВЛЕНИЕ МОКОВЫХ ДАННЫХ ===")
+        # print(f"\n=== ДОБАВЛЕНИЕ МОКОВЫХ ДАННЫХ ===")
         
-        # Добавляем MockShop ДО сравнения
-        all_shop_products = self.data_service.add_mock_shop_to_results(all_shop_products)
+        # # Добавляем MockShop ДО сравнения
+        # all_shop_products = self.data_service.add_mock_shop_to_results(all_shop_products)
         
         print(f"\n=== СОХРАНЕНИЕ РЕЗУЛЬТАТОВ ===")
         
