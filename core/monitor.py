@@ -97,7 +97,9 @@ class EtsyMonitor:
         return all_shop_products
     
     def run_monitoring_cycle(self):
-        """Запускает один цикл мониторинга"""
+        """Запускает один цикл мониторинга и возвращает результаты для бота"""
+        from models.product import ShopComparison
+        
         print("🚀 Запуск цикла мониторинга Etsy магазинов")
         print(f"Время: {time.strftime('%Y-%m-%d %H:%M:%S')}")
         
@@ -109,12 +111,7 @@ class EtsyMonitor:
         
         if not all_shop_products:
             print("❌ Не удалось получить данные ни от одного магазина")
-            return
-        
-        # print(f"\n=== ДОБАВЛЕНИЕ МОКОВЫХ ДАННЫХ ===")
-        
-        # # Добавляем MockShop ДО сравнения
-        # all_shop_products = self.data_service.add_mock_shop_to_results(all_shop_products)
+            return []
         
         print(f"\n=== СОХРАНЕНИЕ РЕЗУЛЬТАТОВ ===")
         
@@ -129,28 +126,50 @@ class EtsyMonitor:
         for shop_name, products in all_shop_products.items():
             current_results[shop_name] = {product.listing_id: product.url for product in products}
         
-        # Находим новые товары (включая MockShop)
-        new_products = self.data_service.compare_all_shops_results(current_results)
+        # Находим новые товары
+        new_products_dict = self.data_service.compare_all_shops_results(current_results)
         
         # Сохраняем финальные результаты с новыми товарами
-        final_results_file = self.data_service.save_results_with_new_products(all_shop_products, new_products)
+        final_results_file = self.data_service.save_results_with_new_products(all_shop_products, new_products_dict)
+        
+        # Формируем результаты для бота
+        comparison_results = []
+        
+        for shop_name, products in all_shop_products.items():
+            # Находим новые товары для этого магазина
+            new_products_for_shop = []
+            for product in products:
+                if product.listing_id in new_products_dict:
+                    new_products_for_shop.append(product)
+            
+            # Создаем объект сравнения
+            comparison = ShopComparison(
+                shop_name=shop_name,
+                new_products=new_products_for_shop,
+                removed_products=[],  # Пока не отслеживаем удаленные товары
+                total_current=len(products),
+                total_previous=len(products) - len(new_products_for_shop),
+                comparison_date=None  # Будет установлена автоматически
+            )
+            
+            comparison_results.append(comparison)
         
         print(f"\n=== ИТОГИ ЦИКЛА ===")
         print(f"Успешно обработано магазинов: {len(all_shop_products)}")
         print(f"Общее количество товаров: {sum(len(products) for products in all_shop_products.values())}")
-        print(f"Найдено новых товаров: {len(new_products)}")
+        print(f"Найдено новых товаров: {len(new_products_dict)}")
         
         if all_shop_products:
             print("Обработанные магазины:")
             for shop_name, products in all_shop_products.items():
                 print(f"  - {shop_name}: {len(products)} товаров")
         
-        if new_products:
-            print(f"\nНовые товары ({len(new_products)}):")
-            for listing_id, url in list(new_products.items())[:5]:  # Показываем первые 5
+        if new_products_dict:
+            print(f"\nНовые товары ({len(new_products_dict)}):")
+            for listing_id, url in list(new_products_dict.items())[:5]:  # Показываем первые 5
                 print(f"  - {listing_id}: {url}")
-            if len(new_products) > 5:
-                print(f"  ... и еще {len(new_products) - 5} товаров")
+            if len(new_products_dict) > 5:
+                print(f"  ... и еще {len(new_products_dict) - 5} товаров")
         
         # Удаляем предыдущую папку парсинга после успешного завершения
         print(f"\n=== ОЧИСТКА СТАРЫХ ДАННЫХ ===")
@@ -163,3 +182,4 @@ class EtsyMonitor:
             print("⚠️ Не удалось удалить предыдущую папку или она не существует")
         
         print("✅ Цикл мониторинга завершен")
+        return comparison_results

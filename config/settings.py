@@ -26,10 +26,13 @@ class AppConfig:
     google_sheets_credentials: str = "credentials.json"
     google_sheets_spreadsheet_id: str = "1YT4JqyDd6s3n4MZVle2MxyrN9PDnHlmYxSsIhNUU6jY"
     
-    
     # Настройки планировщика
     scheduler_enabled: bool = True
     # Планировщик запускается каждый день в 4:00 МСК
+    
+    # Настройки Telegram бота
+    telegram_bot_enabled: bool = True
+    telegram_notifications_enabled: bool = True
     
     etsy: EtsyConfig = None
     

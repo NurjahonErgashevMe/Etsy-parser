@@ -23,9 +23,48 @@ class BrowserService:
         self.captured_headers = {}
         self.max_retries = 3
         self.wait_timeout = 90  # 1.5 минуты
+    
+    def _check_chrome_installation(self) -> bool:
+        """Проверяет наличие установленного Chrome"""
+        import os
+        import subprocess
+        
+        print("🔍 Проверяем установку Google Chrome...")
+        
+        # Возможные пути к Chrome на Windows
+        chrome_paths = [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            os.path.expanduser(r"~\AppData\Local\Google\Chrome\Application\chrome.exe")
+        ]
+        
+        # Проверяем наличие файла Chrome
+        for path in chrome_paths:
+            if os.path.exists(path):
+                print(f"✅ Chrome найден: {path}")
+                return True
+        
+        # Пытаемся запустить chrome через командную строку
+        try:
+            result = subprocess.run(["chrome", "--version"], 
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                print(f"✅ Chrome найден в PATH: {result.stdout.strip()}")
+                return True
+        except:
+            pass
+        
+        print("❌ Google Chrome не найден!")
+        print("💡 Установите Google Chrome: https://www.google.com/chrome/")
+        print("💡 Или убедитесь, что Chrome установлен в стандартной папке")
+        return False
         
     def setup_driver(self):
         """Настройка Chrome драйвера с stealth режимом и имитацией человека"""
+        # Проверяем наличие Chrome
+        if not self._check_chrome_installation():
+            return False
+            
         chrome_options = Options()
         
         # Основные опции для stealth режима
@@ -68,8 +107,33 @@ class BrowserService:
         # chrome_options.add_argument("--allow-running-insecure-content")
         
         try:
-            # Автоматическая установка ChromeDriver
-            service = Service(ChromeDriverManager().install())
+            print("🔧 Устанавливаем ChromeDriver...")
+            
+            # Пытаемся установить ChromeDriver с обработкой ошибок
+            try:
+                driver_path = ChromeDriverManager().install()
+                print(f"✅ ChromeDriver путь: {driver_path}")
+                
+                # Проверяем, что путь указывает на правильный файл
+                import os
+                if not driver_path.endswith('chromedriver.exe'):
+                    # Ищем chromedriver.exe в той же папке
+                    driver_dir = os.path.dirname(driver_path)
+                    chromedriver_exe = os.path.join(driver_dir, 'chromedriver.exe')
+                    if os.path.exists(chromedriver_exe):
+                        driver_path = chromedriver_exe
+                        print(f"🔧 Исправлен путь к ChromeDriver: {driver_path}")
+                    else:
+                        print(f"❌ chromedriver.exe не найден в {driver_dir}")
+                        raise Exception("ChromeDriver executable not found")
+                
+                service = Service(driver_path)
+            except Exception as e:
+                print(f"❌ Ошибка установки ChromeDriver: {e}")
+                print("🔄 Пытаемся использовать системный ChromeDriver...")
+                service = Service()  # Попробуем системный драйвер
+            
+            print("🚀 Запускаем Chrome браузер...")
             self.driver = webdriver.Chrome(service=service, options=chrome_options)
             
             # Применяем stealth настройки
@@ -92,6 +156,18 @@ class BrowserService:
             
         except Exception as e:
             print(f"❌ Ошибка при запуске браузера: {e}")
+            
+            # Пытаемся диагностировать проблему
+            if "WinError 193" in str(e):
+                print("🔍 Диагностика: Проблема с исполняемым файлом Chrome")
+                print("💡 Возможные решения:")
+                print("   1. Установите Google Chrome: https://www.google.com/chrome/")
+                print("   2. Перезапустите терминал/IDE")
+                print("   3. Проверьте PATH переменную")
+            elif "chromedriver" in str(e).lower():
+                print("🔍 Диагностика: Проблема с ChromeDriver")
+                print("💡 Попробуйте переустановить ChromeDriver")
+            
             return False
     
     def _setup_human_behavior(self):
