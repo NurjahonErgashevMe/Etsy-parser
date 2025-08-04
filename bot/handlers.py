@@ -161,21 +161,36 @@ async def start_manual_parsing(message: Message, db: BotDatabase, scheduler=None
     if not await db.is_admin(message.from_user.id):
         return
     
-    await message.answer(
-        "🚀 Запуск разового парсинга...\n\n"
-        "⏳ Это может занять несколько минут. Вы получите уведомления о найденных товарах."
-    )
-    
     if scheduler:
-        try:
-            # Запускаем парсинг вручную, передаем ID пользователя для персональных уведомлений
-            await scheduler.scheduled_parsing_job(user_id=message.from_user.id)
-        except Exception as e:
+        # Проверяем статус парсера
+        if scheduler.parser_lock.is_running():
             await message.answer(
-                f"❌ Ошибка при парсинге:\n\n"
-                f"🚨 {str(e)[:200]}\n\n"
-                f"Проверьте логи для получения подробной информации."
+                "⚠️ Парсер уже запущен!\n\n"
+                "Дождитесь завершения текущего процесса парсинга."
             )
+            return
+        
+        await message.answer(
+            "🚀 Запуск разового парсинга...\n\n"
+            "⏳ Это может занять несколько минут. Вы получите уведомления о найденных товарах."
+        )
+        
+        # Запускаем парсинг асинхронно, не блокируя основной поток
+        import asyncio
+        
+        async def run_parsing_async():
+            """Запуск парсинга асинхронно"""
+            try:
+                await scheduler.scheduled_parsing_job(user_id=message.from_user.id)
+            except Exception as e:
+                logging.error(f"Ошибка при парсинге: {e}")
+                await scheduler.notification_service.send_message_to_user(
+                    message.from_user.id,
+                    f"❌ Ошибка при парсинге:\n\n🚨 {str(e)[:200]}"
+                )
+        
+        # Запускаем задачу в фоне
+        asyncio.create_task(run_parsing_async())
     else:
         await message.answer("❌ Планировщик недоступен. Перезапустите бота.")
 
@@ -394,8 +409,61 @@ async def cancel_delete_admin(callback: CallbackQuery):
     await callback.message.answer("Возвращаемся в меню управления администраторами.", reply_markup=get_admin_menu())
     await callback.answer()
 
+@router.callback_query(F.data == "stop_parsing")
+async def stop_parsing(callback: CallbackQuery, db: BotDatabase, scheduler=None):
+    """Принудительная остановка парсинга"""
+    if not await db.is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    if scheduler:
+        # Проверяем, действительно ли парсер работает
+        if not scheduler.parser_lock.is_running():
+            await callback.message.edit_text("ℹ️ Парсер уже остановлен.")
+            await callback.answer()
+            return
+        
+        # Принудительно останавливаем парсер
+        success = scheduler.parser_lock.force_stop()
+        
+        if success:
+            await callback.message.edit_text(
+                "🛑 <b>Парсинг принудительно остановлен</b>\n\n"
+                "✅ Процесс завершен\n"
+                "🧹 Файлы сессии очищены\n"
+                "📝 Статус изменен на 'stop'"
+            )
+            
+            # Уведомляем всех админов об остановке
+            try:
+                admins = await db.get_all_admins()
+                stop_message = f"""🛑 <b>Парсинг остановлен администратором</b>
+
+👤 Остановил: {callback.from_user.first_name or callback.from_user.id}
+⏰ Время: {datetime.now().strftime("%d.%m.%Y %H:%M")}
+
+⚠️ Процесс был принудительно завершен"""
+                
+                for admin_id, _ in admins:
+                    if admin_id != callback.from_user.id:  # Не отправляем тому, кто остановил
+                        try:
+                            await scheduler.notification_service.send_message_to_user(admin_id, stop_message)
+                        except Exception:
+                            pass
+            except Exception as e:
+                logging.error(f"Ошибка уведомления об остановке: {e}")
+        else:
+            await callback.message.edit_text(
+                "❌ Ошибка при остановке парсинга.\n\n"
+                "Попробуйте еще раз или перезапустите бота."
+            )
+    else:
+        await callback.message.edit_text("❌ Планировщик недоступен.")
+    
+    await callback.answer()
+
 @router.message(F.text == "📊 Статистика")
-async def statistics(message: Message, db: BotDatabase):
+async def statistics(message: Message, db: BotDatabase, scheduler=None):
     """Показать статистику"""
     if not await db.is_admin(message.from_user.id):
         return
@@ -413,10 +481,16 @@ async def statistics(message: Message, db: BotDatabase):
         "sunday": "Воскресенье"
     }
     
+    # Проверяем статус парсера
+    parser_status = "🔴 Остановлен"
+    if scheduler and scheduler.parser_lock.is_running():
+        parser_status = "🟢 Работает"
+    
     await message.answer(
         f"📊 Статистика:\n\n"
         f"👥 Администраторов: {len(await db.get_all_admins())}\n"
-        f"📅 Расписание: {day_names.get(schedule_day, schedule_day)} в {schedule_time}"
+        f"📅 Расписание: {day_names.get(schedule_day, schedule_day)} в {schedule_time}\n"
+        f"⚙️ Статус парсера: {parser_status}"
     )
 
 @router.message(F.text == "ℹ️ Помощь")

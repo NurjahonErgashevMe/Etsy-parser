@@ -14,6 +14,244 @@ from bot.database import BotDatabase
 from bot.notifications import NotificationService
 from core.monitor import EtsyMonitor
 from models.product import Product
+import os
+
+class ParserLock:
+    """Класс для управления блокировкой парсера"""
+    
+    def __init__(self, lock_file="parser.lock"):
+        self.lock_file = lock_file
+    
+    def is_running(self) -> bool:
+        """Проверяет, запущен ли парсер"""
+        if not os.path.exists(self.lock_file):
+            return False
+        
+        try:
+            with open(self.lock_file, 'r') as f:
+                status = f.read().strip()
+                return status == "working"
+        except Exception:
+            return False
+    
+    def set_working(self):
+        """Устанавливает статус 'working'"""
+        try:
+            with open(self.lock_file, 'w') as f:
+                f.write("working")
+        except Exception as e:
+            logging.error(f"Ошибка установки блокировки: {e}")
+    
+    def set_stopped(self):
+        """Устанавливает статус 'stop'"""
+        try:
+            with open(self.lock_file, 'w') as f:
+                f.write("stop")
+        except Exception as e:
+            logging.error(f"Ошибка снятия блокировки: {e}")
+    
+    def get_status(self) -> str:
+        """Получает текущий статус"""
+        if not os.path.exists(self.lock_file):
+            return "stop"
+        
+        try:
+            with open(self.lock_file, 'r') as f:
+                return f.read().strip()
+        except Exception:
+            return "stop"
+    
+    def force_stop(self):
+        """Принудительно останавливает парсер и очищает сессию"""
+        try:
+            # Устанавливаем статус остановки
+            self.set_stopped()
+            
+            # Очищаем папку текущей сессии парсинга
+            self.cleanup_current_session()
+            
+            logging.info("Парсер принудительно остановлен")
+            return True
+        except Exception as e:
+            logging.error(f"Ошибка принудительной остановки: {e}")
+            return False
+    
+    def cleanup_current_session(self):
+        """Очищает файлы текущей сессии парсинга"""
+        try:
+            import shutil
+            from config.settings import config
+            
+            output_dir = config.output_dir
+            if os.path.exists(output_dir):
+                # Находим папку текущей сессии (самую новую)
+                session_dirs = [d for d in os.listdir(output_dir) 
+                               if os.path.isdir(os.path.join(output_dir, d)) and d.startswith('parsing_')]
+                
+                if session_dirs:
+                    # Сортируем по времени создания и берем самую новую
+                    session_dirs.sort(key=lambda x: os.path.getctime(os.path.join(output_dir, x)), reverse=True)
+                    current_session = session_dirs[0]
+                    session_path = os.path.join(output_dir, current_session)
+                    
+                    # Удаляем папку сессии
+                    shutil.rmtree(session_path)
+                    logging.info(f"Удалена папка сессии: {session_path}")
+                    
+        except Exception as e:
+            logging.error(f"Ошибка очистки сессии: {e}")
+
+class LoggingEtsyMonitor:
+    """Обертка для EtsyMonitor с поддержкой логирования"""
+    
+    def __init__(self, monitor: EtsyMonitor, logger=None):
+        self.monitor = monitor
+        self.logger = logger
+    
+    def log_sync(self, message: str):
+        """Добавляет запись в лог синхронно"""
+        if self.logger:
+            # Сохраняем сообщение для последующей отправки
+            if not hasattr(self, 'pending_logs'):
+                self.pending_logs = []
+            
+            self.pending_logs.append(message)
+            logging.info(f"LOG: {message}")  # Дублируем в обычные логи
+    
+    async def flush_logs(self):
+        """Отправляет все накопленные логи"""
+        if self.logger and hasattr(self, 'pending_logs'):
+            for log_message in self.pending_logs:
+                try:
+                    await self.logger.add_log_entry(log_message)
+                except Exception as e:
+                    logging.error(f"Ошибка отправки лога: {e}")
+            
+            self.pending_logs.clear()
+    
+    def run_monitoring_cycle_with_logging(self):
+        """Запуск мониторинга с логированием без двойного парсинга"""
+        try:
+            # Получаем ссылки из Google Sheets
+            links = self.monitor.data_service.load_shop_urls()
+            
+            if not links:
+                self.log_sync("❌ Не удалось получить ссылки из Google Sheets")
+                return []
+            
+            self.log_sync(f"📋 Найдено {len(links)} магазинов в Google Sheets")
+            
+            # Создаём папку для текущего сеанса парсинга
+            parsing_dir = self.monitor.data_service.start_parsing_session()
+            
+            # Парсим все магазины с логированием
+            all_shop_products = self.parse_all_shops_with_logging(links)
+            
+            # Проверяем, не был ли парсинг остановлен принудительно
+            from bot.scheduler_integration import ParserLock
+            parser_lock = ParserLock()
+            if not parser_lock.is_running():
+                self.log_sync("🛑 Парсинг был остановлен принудительно")
+                return []
+            
+            if not all_shop_products:
+                self.log_sync("❌ Не удалось получить данные ни от одного магазина")
+                return []
+            
+            self.log_sync("🔍 Анализируем новые товары...")
+            
+            # Сохраняем результаты в JSON
+            results_file = self.monitor.data_service.save_results_to_json(all_shop_products)
+            
+            # Сравниваем с предыдущими результатами
+            current_results = {}
+            for shop_name, products in all_shop_products.items():
+                current_results[shop_name] = {product.listing_id: product.url for product in products}
+            
+            # Находим новые товары
+            new_products_dict = self.monitor.data_service.compare_all_shops_results(current_results)
+            
+            # Сохраняем финальные результаты
+            final_results_file = self.monitor.data_service.save_results_with_new_products(all_shop_products, new_products_dict)
+            
+            # Формируем результаты для бота
+            comparison_results = []
+            
+            for shop_name, products in all_shop_products.items():
+                # Находим новые товары для этого магазина
+                new_products_for_shop = []
+                for product in products:
+                    if product.listing_id in new_products_dict:
+                        new_products_for_shop.append(product)
+                
+                # Создаем объект сравнения
+                from models.product import ShopComparison
+                comparison = ShopComparison(
+                    shop_name=shop_name,
+                    new_products=new_products_for_shop,
+                    removed_products=[],
+                    total_current=len(products),
+                    total_previous=len(products) - len(new_products_for_shop),
+                    comparison_date=None
+                )
+                
+                comparison_results.append(comparison)
+            
+            # Логируем итоги
+            total_new = len(new_products_dict)
+            if total_new > 0:
+                self.log_sync(f"🎉 Найдено {total_new} новых товаров!")
+            else:
+                self.log_sync("📭 Новых товаров не найдено")
+            
+            # Удаляем предыдущую папку парсинга
+            if self.monitor.data_service.delete_previous_parsing_folder():
+                self.log_sync("🧹 Очистка завершена")
+            
+            return comparison_results
+            
+        except Exception as e:
+            self.log_sync(f"❌ Критическая ошибка: {str(e)[:100]}")
+            logging.error(f"Критическая ошибка в мониторинге: {e}")
+            return []
+    
+    def parse_all_shops_with_logging(self, urls):
+        """Парсит все магазины с логированием прогресса"""
+        all_shop_products = {}
+        
+        for i, url in enumerate(urls, 1):
+            # Проверяем, не был ли парсинг остановлен принудительно
+            from bot.scheduler_integration import ParserLock
+            parser_lock = ParserLock()
+            if not parser_lock.is_running():
+                self.log_sync("🛑 Парсинг остановлен пользователем")
+                break
+            
+            try:
+                shop_name = self.monitor.parser.get_shop_name_from_url(url)
+                self.log_sync(f"🔄 [{i}/{len(urls)}] Парсим: {shop_name}")
+                
+                # Парсим магазин
+                products = self.monitor.parser.parse_shop_page(url)
+                
+                if products:
+                    all_shop_products[shop_name] = products
+                    
+                    # Сохраняем данные
+                    filename = self.monitor.data_service.save_products_to_excel(products, shop_name)
+                    
+                    self.log_sync(f"✅ {shop_name}: {len(products)} товаров")
+                else:
+                    self.log_sync(f"⚠️ {shop_name}: не удалось получить товары")
+                
+            except Exception as e:
+                shop_name = self.monitor.parser.get_shop_name_from_url(url) if url else "Unknown"
+                self.log_sync(f"❌ Ошибка в {shop_name}: {str(e)[:50]}")
+                logging.error(f"Ошибка парсинга {url}: {e}")
+        
+        return all_shop_products
+
+
 
 class BotScheduler:
     """Планировщик с интеграцией Telegram бота"""
@@ -25,17 +263,41 @@ class BotScheduler:
         self.is_running = False
         self.scheduler_thread: Optional[Thread] = None
         self.moscow_tz = pytz.timezone('Europe/Moscow')
+        self.parser_lock = ParserLock()
     
     async def scheduled_parsing_job(self, user_id: int = None):
         """Задача парсинга с уведомлениями"""
+        logger = None
+        
+        # Проверяем блокировку парсера
+        if self.parser_lock.is_running():
+            error_msg = "⚠️ Парсер уже запущен! Дождитесь завершения текущего процесса."
+            if user_id:
+                await self.notification_service.send_message_to_user(user_id, error_msg)
+            logging.warning("Попытка запуска парсера во время работы другого процесса")
+            return
+        
+        # Устанавливаем блокировку
+        self.parser_lock.set_working()
+        
         try:
             logging.info("Запуск парсинга с уведомлениями")
             
-            # Уведомляем о начале парсинга
-            await self.notification_service.send_parsing_started_notification(user_id)
+            # Если есть user_id, создаем логгер для детального отслеживания
+            if user_id:
+                from bot.notifications import ParsingLogger
+                logger = ParsingLogger(self.notification_service, user_id)
+                await logger.start_logging()
+            else:
+                # Для автоматического парсинга отправляем простое уведомление всем
+                await self.notification_service.send_parsing_started_notification(user_id)
             
-            # Запускаем мониторинг
-            comparison_results = self.monitor.run_monitoring_cycle()
+            # Запускаем мониторинг с логированием
+            if logger:
+                comparison_results = await self.run_monitoring_with_logging(logger)
+            else:
+                # Для автоматического запуска используем обычный монитор
+                comparison_results = self.monitor.run_monitoring_cycle()
             
             # Собираем все новые товары
             all_new_products = []
@@ -48,8 +310,11 @@ class BotScheduler:
                 await self.notification_service.send_multiple_products_notification(all_new_products)
                 logging.info(f"Найдено и отправлено уведомлений о {len(all_new_products)} новых товарах")
             
-            # Уведомляем о завершении парсинга
-            await self.notification_service.send_parsing_completed_notification(len(all_new_products), user_id)
+            # Завершаем логирование или отправляем уведомление
+            if logger:
+                await logger.finish_logging(len(all_new_products))
+            else:
+                await self.notification_service.send_parsing_completed_notification(len(all_new_products), user_id)
             
             logging.info("Парсинг завершен успешно")
             
@@ -64,8 +329,9 @@ class BotScheduler:
 
 Проверьте логи для получения подробной информации."""
                 
-                if user_id:
-                    # Отправляем только инициатору
+                if logger:
+                    await logger.add_log_entry(f"❌ Ошибка: {str(e)[:100]}")
+                elif user_id:
                     await self.notification_service.send_message_to_user(user_id, error_message)
                 else:
                     # Отправляем всем админам
@@ -74,6 +340,62 @@ class BotScheduler:
                         await self.notification_service.send_message_to_user(admin_id, error_message)
             except Exception:
                 pass
+        finally:
+            # Снимаем блокировку
+            self.parser_lock.set_stopped()
+            logging.info("Блокировка парсера снята")
+    
+    async def run_monitoring_with_logging(self, logger=None):
+        """Запуск мониторинга с детальным логированием"""
+        try:
+            if logger:
+                await logger.add_log_entry("🔍 Начинаем сканирование магазинов...")
+            
+            # Используем реальный EtsyMonitor с логированием
+            comparison_results = await self.run_real_monitoring_with_logging(logger)
+            
+            return comparison_results
+            
+        except Exception as e:
+            if logger:
+                await logger.add_log_entry(f"❌ Критическая ошибка: {str(e)[:100]}")
+            raise e
+    
+    async def run_real_monitoring_with_logging(self, logger=None):
+        """Запуск реального мониторинга с логированием"""
+        try:
+            # Создаем кастомный монитор с логированием
+            custom_monitor = LoggingEtsyMonitor(self.monitor, logger)
+            
+            # Запускаем мониторинг с логированием в отдельном потоке
+            import concurrent.futures
+            
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(custom_monitor.run_monitoring_cycle_with_logging)
+                comparison_results = future.result()
+            
+            # Отправляем накопленные логи
+            await custom_monitor.flush_logs()
+            
+            return comparison_results
+            
+        except Exception as e:
+            logging.error(f"Ошибка в реальном мониторинге: {e}")
+            if logger:
+                await logger.add_log_entry(f"❌ Ошибка мониторинга: {str(e)[:100]}")
+            return []
+    
+    def extract_shop_name(self, url: str) -> str:
+        """Извлекает название магазина из URL"""
+        try:
+            if 'etsy.com/shop/' in url:
+                return url.split('/shop/')[1].split('/')[0].split('?')[0]
+            else:
+                return url.split('//')[1].split('/')[0][:20]
+        except:
+            return "Unknown Shop"
+    
+
     
     def _schedule_job_wrapper(self):
         """Обертка для запуска асинхронной задачи в синхронном планировщике"""
@@ -82,7 +404,7 @@ class BotScheduler:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             
-            # Запускаем асинхронную задачу
+            # Запускаем асинхронную задачу (без user_id для автоматического запуска)
             loop.run_until_complete(self.scheduled_parsing_job())
             
         except Exception as e:

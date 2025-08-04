@@ -123,3 +123,12 @@ def get_confirm_delete_keyboard(user_id: int) -> InlineKeyboardMarkup:
         ]
     )
     return keyboard
+
+def get_stop_parsing_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для остановки парсинга"""
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🛑 Завершить парсинг", callback_data="stop_parsing")]
+        ]
+    )
+    return keyboard

@@ -98,6 +98,7 @@ class BrowserService:
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--disable-extensions")
         chrome_options.add_argument("--disable-plugins")
+        chrome_options.add_argument("--headless=new")
         # Убираем конфликтующие опции
         # chrome_options.add_argument("--disable-images")  # Уже отключены через prefs
         # chrome_options.add_argument("--disable-javascript")  # JS нужен для работы сайта
@@ -291,11 +292,17 @@ class BrowserService:
         
         start_time = time.time()
         last_status = None
+        last_activity_time = start_time
+        inactivity_timeout = 60  # 1 минута бездействия
         
         while time.time() - start_time < self.wait_timeout:
             try:
                 # Получаем логи производительности
                 logs = self.driver.get_log('performance')
+                
+                # Если есть новые логи, обновляем время последней активности
+                if logs:
+                    last_activity_time = time.time()
                 
                 for log in logs:
                     message = json.loads(log['message'])
@@ -326,6 +333,15 @@ class BrowserService:
                                 return False, 429
                             else:
                                 print(f"⚠️ Получен {status} ответ для {url}")
+                
+                # Проверяем бездействие страницы
+                current_time = time.time()
+                if current_time - last_activity_time > inactivity_timeout:
+                    print(f"⏰ Страница бездействует {inactivity_timeout}s - принудительная перезагрузка")
+                    self.driver.refresh()
+                    self._wait_for_page_load()
+                    last_activity_time = current_time
+                    print("🔄 Страница перезагружена, продолжаем ожидание...")
                 
                 time.sleep(1)  # Небольшая пауза между проверками
                 

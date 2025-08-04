@@ -10,6 +10,71 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from bot.database import BotDatabase
 from models.product import Product
 
+class ParsingLogger:
+    """Класс для управления логами парсинга в реальном времени"""
+    
+    def __init__(self, notification_service, user_id: int):
+        self.notification_service = notification_service
+        self.user_id = user_id
+        self.log_message = None
+        self.log_entries = []
+        self.max_message_length = 4000  # Лимит Telegram ~4096, оставляем запас
+        
+    async def start_logging(self):
+        """Начинаем логирование - отправляем первое сообщение"""
+        initial_text = "🚀 <b>Запуск парсинга</b>\n\n📋 <b>Лог процесса:</b>\n\n⏳ Инициализация..."
+        
+        self.log_message = await self.notification_service.send_message_to_user(
+            self.user_id, initial_text
+        )
+        
+        if self.log_message:
+            self.log_entries.append("⏳ Инициализация...")
+    
+    async def add_log_entry(self, entry: str):
+        """Добавляем новую запись в лог"""
+        if not self.log_message:
+            return
+            
+        self.log_entries.append(entry)
+        
+        # Формируем новый текст сообщения
+        new_text = "🚀 <b>Запуск парсинга</b>\n\n📋 <b>Лог процесса:</b>\n\n"
+        
+        # Добавляем записи, следя за лимитом длины
+        temp_entries = []
+        temp_length = len(new_text)
+        
+        # Идем с конца, чтобы показать самые свежие записи
+        for entry in reversed(self.log_entries):
+            entry_length = len(entry) + 1  # +1 для \n
+            if temp_length + entry_length > self.max_message_length:
+                break
+            temp_entries.insert(0, entry)
+            temp_length += entry_length
+        
+        # Если не все записи поместились, добавляем индикатор
+        if len(temp_entries) < len(self.log_entries):
+            new_text += "...\n"
+        
+        new_text += "\n".join(temp_entries)
+        
+        # Обновляем сообщение
+        await self.notification_service.edit_message(
+            self.user_id, 
+            self.log_message.message_id, 
+            new_text
+        )
+    
+    async def finish_logging(self, total_new_products: int):
+        """Завершаем логирование"""
+        if total_new_products > 0:
+            final_entry = f"✅ <b>Парсинг завершен!</b> Найдено {total_new_products} новых товаров"
+        else:
+            final_entry = "✅ <b>Парсинг завершен!</b> Новых товаров не найдено"
+            
+        await self.add_log_entry(final_entry)
+
 class NotificationService:
     """Сервис для отправки уведомлений о новых товарах"""
     
@@ -20,14 +85,28 @@ class NotificationService:
     async def send_message_to_user(self, user_id: int, message: str, parse_mode: str = "HTML") -> bool:
         """Отправка сообщения конкретному пользователю"""
         try:
-            await self.bot.send_message(
+            sent_message = await self.bot.send_message(
                 chat_id=user_id,
                 text=message,
                 parse_mode=parse_mode
             )
-            return True
+            return sent_message
         except Exception as e:
             logging.error(f"Ошибка отправки сообщения пользователю {user_id}: {e}")
+            return False
+
+    async def edit_message(self, chat_id: int, message_id: int, new_text: str, parse_mode: str = "HTML") -> bool:
+        """Редактирование существующего сообщения"""
+        try:
+            await self.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=new_text,
+                parse_mode=parse_mode
+            )
+            return True
+        except Exception as e:
+            logging.error(f"Ошибка редактирования сообщения: {e}")
             return False
     
     async def send_new_product_notification(self, product: Product) -> bool:
