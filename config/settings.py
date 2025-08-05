@@ -5,6 +5,29 @@ import os
 from dataclasses import dataclass
 from typing import Dict, Any
 
+def read_config_file() -> Dict[str, str]:
+    """Читает конфигурацию из config.txt"""
+    config_data = {}
+    config_file = "config.txt"
+    
+    if os.path.exists(config_file):
+        try:
+            with open(config_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and '=' in line:
+                        key, value = line.split('=', 1)
+                        config_data[key.strip()] = value.strip()
+        except Exception as e:
+            print(f"Ошибка чтения config.txt: {e}")
+    
+    return config_data
+
+def is_parser_working() -> bool:
+    """Проверяет, запущен ли парсер согласно config.txt"""
+    config_data = read_config_file()
+    return config_data.get('is_working', 'stop').lower() == 'start'
+
 @dataclass
 class EtsyConfig:
     """Конфигурация для парсера Etsy (только браузер)"""
@@ -17,9 +40,12 @@ class EtsyConfig:
 class AppConfig:
     """Общая конфигурация приложения"""
     # Пути к файлам и папкам
-    links_file: str = "links.txt"
     output_dir: str = "output"
     logs_dir: str = "logs"
+    
+    def is_working(self) -> bool:
+        """Проверяет, запущен ли парсер"""
+        return is_parser_working()
     
     # Google Sheets настройки
     google_sheets_enabled: bool = True

@@ -98,7 +98,7 @@ class BrowserService:
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--disable-extensions")
         chrome_options.add_argument("--disable-plugins")
-        chrome_options.add_argument("--headless=new")
+        # chrome_options.add_argument("--headless=new")
         # Убираем конфликтующие опции
         # chrome_options.add_argument("--disable-images")  # Уже отключены через prefs
         # chrome_options.add_argument("--disable-javascript")  # JS нужен для работы сайта

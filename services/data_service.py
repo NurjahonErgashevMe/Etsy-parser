@@ -8,6 +8,7 @@ import json
 import shutil
 import random
 import string
+import logging
 from datetime import datetime
 from typing import List, Optional, Tuple, Dict
 from models.product import Product, ShopComparison
@@ -212,39 +213,38 @@ class DataService:
             return None
     
     def get_previous_results_file(self) -> Optional[str]:
-        """Находит самый последний файл results.json до текущего времени"""
+        """Находит самый последний файл results.json (ТОЛЬКО с results.json!)"""
         # Исключаем текущую папку парсинга из поиска
         current_folder_name = self.current_parsing_folder if self.current_parsing_folder else datetime.now().strftime("%d.%m.%Y_%H.%M")
         
-        # Получаем все папки с датами
+        # Получаем все папки с results.json (ОБЯЗАТЕЛЬНО!)
         date_folders = []
         for item in os.listdir(self.output_dir):
             item_path = os.path.join(self.output_dir, item)
             if os.path.isdir(item_path) and item != current_folder_name:
-                # Проверяем, есть ли в папке results.json
+                # Проверяем, есть ли в папке results.json (ОБЯЗАТЕЛЬНО!)
                 results_file = os.path.join(item_path, "results.json")
                 if os.path.exists(results_file):
                     try:
                         # Парсим дату и время из названия папки
                         if "_" in item:
-                            # Новый формат DD.MM.YYYY_HH.MM
                             folder_datetime = datetime.strptime(item, "%d.%m.%Y_%H.%M")
                         else:
-                            # Старый формат DD.MM.YYYY (для обратной совместимости)
                             folder_datetime = datetime.strptime(item, "%d.%m.%Y")
                         date_folders.append((folder_datetime, results_file))
+                        logging.info(f"Найдена папка с results.json: {item}")
                     except ValueError:
                         continue
         
         if not date_folders:
-            print("Предыдущие результаты не найдены")
+            logging.info("Предыдущие результаты с results.json не найдены")
             return None
         
         # Сортируем по дате и берем самый последний
         date_folders.sort(key=lambda x: x[0], reverse=True)
         latest_file = date_folders[0][1]
         
-        print(f"Найден предыдущий файл результатов: {latest_file}")
+        logging.info(f"Найден последний results.json: {latest_file}")
         return latest_file
     
     def compare_all_shops_results(self, current_results: Dict[str, Dict[str, str]]) -> Dict[str, str]:
@@ -399,94 +399,49 @@ class DataService:
         else:
             print("📊 Google Sheets отключен в конфигурации")
     
-    def delete_previous_parsing_folder(self) -> bool:
-        """Удаляет предыдущую папку парсинга с повторными попытками"""
-        previous_results_file = self.get_previous_results_file()
-        
-        if not previous_results_file:
-            print("Нет предыдущей папки для удаления")
+    def cleanup_output_folder(self) -> bool:
+        """Очищает всю output папку, оставляя только текущую папку парсинга"""
+        if not self.current_parsing_folder:
+            logging.info("Нет текущей папки парсинга для очистки")
             return True
         
-        # Получаем путь к папке из пути к файлу
-        previous_folder = os.path.dirname(previous_results_file)
-        
-        if not os.path.exists(previous_folder):
-            print(f"Папка {previous_folder} уже не существует")
+        try:
+            # Получаем все папки в output
+            folders_to_delete = []
+            for item in os.listdir(self.output_dir):
+                item_path = os.path.join(self.output_dir, item)
+                if os.path.isdir(item_path) and item != self.current_parsing_folder:
+                    folders_to_delete.append(item_path)
+            
+            if not folders_to_delete:
+                logging.info("Нет папок для удаления")
+                return True
+            
+            logging.info(f"Очищаем output папку: удаляем {len(folders_to_delete)} папок")
+            
+            # Удаляем все папки кроме текущей
+            deleted_count = 0
+            for folder_path in folders_to_delete:
+                try:
+                    shutil.rmtree(folder_path, ignore_errors=True)
+                    if not os.path.exists(folder_path):
+                        deleted_count += 1
+                        logging.info(f"✅ Удалена папка: {os.path.basename(folder_path)}")
+                    else:
+                        logging.warning(f"⚠️ Не удалось удалить: {os.path.basename(folder_path)}")
+                except Exception as e:
+                    logging.error(f"❌ Ошибка удаления {folder_path}: {e}")
+            
+            logging.info(f"✅ Очистка завершена: удалено {deleted_count}/{len(folders_to_delete)} папок")
+            logging.info(f"Осталась только текущая папка: {self.current_parsing_folder}")
             return True
-        
-        print(f"Попытка удаления папки: {previous_folder}")
-        
-        # Пытаемся удалить папку с повторными попытками
-        max_attempts = 5
-        for attempt in range(max_attempts):
-            try:
-                # Принудительно закрываем все файловые дескрипторы
-                import gc
-                gc.collect()
-                
-                # Дополнительная пауза для освобождения ресурсов
-                import time
-                time.sleep(1)
-                
-                # Сначала пытаемся изменить права доступа к файлам (для Windows)
-                if os.name == 'nt':  # Windows
-                    import stat
-                    for root, dirs, files in os.walk(previous_folder):
-                        for file in files:
-                            file_path = os.path.join(root, file)
-                            try:
-                                os.chmod(file_path, stat.S_IWRITE)
-                            except:
-                                pass
-                
-                # Удаляем папку целиком
-                shutil.rmtree(previous_folder, ignore_errors=False)
-                
-                # Проверяем, что папка действительно удалена
-                if not os.path.exists(previous_folder):
-                    print(f"✅ Предыдущая папка успешно удалена: {previous_folder}")
-                    return True
-                else:
-                    print(f"⚠️ Папка все еще существует после удаления")
-                    
-            except PermissionError as e:
-                if attempt < max_attempts - 1:
-                    print(f"Попытка {attempt + 1}/{max_attempts}: файлы заблокированы, ожидание 3 секунды...")
-                    time.sleep(3)
-                else:
-                    print(f"❌ Не удалось удалить папку {previous_folder}: файлы заблокированы")
-                    print("Возможные причины:")
-                    print("- Файлы Excel открыты в другой программе")
-                    print("- Папка используется другим процессом")
-                    print("- Недостаточно прав доступа")
-                    
-                    # Попытка альтернативного удаления через командную строку Windows
-                    if os.name == 'nt':
-                        try:
-                            import subprocess
-                            result = subprocess.run(['rmdir', '/s', '/q', previous_folder], 
-                                                  shell=True, capture_output=True, text=True)
-                            if result.returncode == 0 and not os.path.exists(previous_folder):
-                                print(f"✅ Папка удалена через системную команду: {previous_folder}")
-                                return True
-                        except Exception as cmd_error:
-                            print(f"Системная команда также не сработала: {cmd_error}")
-                    
-                    return False
-                    
-            except Exception as e:
-                print(f"❌ Неожиданная ошибка при удалении папки {previous_folder}: {e}")
-                if attempt < max_attempts - 1:
-                    print(f"Повторная попытка через 2 секунды...")
-                    time.sleep(2)
-                else:
-                    return False
-        
-        return False
+            
+        except Exception as e:
+            logging.error(f"❌ Ошибка очистки output папки: {e}")
+            return False
     
-    def load_shop_urls(self, links_file: str = None) -> List[str]:
-        """Загружает список URL магазинов из Google Sheets или файла"""
-        # Сначала пытаемся загрузить из Google Sheets
+    def load_shop_urls(self) -> List[str]:
+        """Загружает список URL магазинов из Google Sheets"""
         if hasattr(self.config, 'google_sheets_enabled') and self.config.google_sheets_enabled:
             try:
                 from services.google_sheets_service import GoogleSheetsService
@@ -501,25 +456,11 @@ class DataService:
                         print(f"📊 Загружено {len(urls)} URL магазинов из Google Sheets")
                         return urls
                     else:
-                        print("⚠️ Google Sheets пуст, используем локальный файл")
+                        print("⚠️ Google Sheets пуст")
+                        return []
             except Exception as e:
                 print(f"⚠️ Ошибка загрузки из Google Sheets: {e}")
-                print("📁 Переключаемся на локальный файл")
-        
-        # Fallback на локальный файл
-        if links_file is None:
-            links_file = self.config.links_file
-        
-        try:
-            with open(links_file, 'r', encoding='utf-8') as f:
-                urls = [line.strip() for line in f if line.strip() and not line.startswith('#')]
-            
-            print(f"📁 Загружено {len(urls)} URL магазинов из локального файла")
-            return urls
-            
-        except FileNotFoundError:
-            print(f"❌ Файл {links_file} не найден")
-            return []
-        except Exception as e:
-            print(f"❌ Ошибка при чтении файла {links_file}: {e}")
+                return []
+        else:
+            print("❌ Google Sheets отключен в конфигурации")
             return []

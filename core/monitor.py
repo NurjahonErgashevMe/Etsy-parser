@@ -2,6 +2,7 @@
 Основной класс для мониторинга магазинов Etsy
 """
 import time
+import logging
 from typing import List, Dict
 from config.settings import config
 from parsers.etsy_parser import EtsyParser
@@ -41,7 +42,7 @@ class EtsyMonitor:
         return filename
     
     def parse_all_shops(self, compare_with_previous: bool = True) -> Dict[str, List[Product]]:
-        """Парсит все магазины из файла links.txt с обработкой 403 ошибок"""
+        """Парсит все магазины"""
         urls = self.data_service.load_shop_urls()
         
         if not urls:
@@ -171,15 +172,15 @@ class EtsyMonitor:
             if len(new_products_dict) > 5:
                 print(f"  ... и еще {len(new_products_dict) - 5} товаров")
         
-        # Удаляем предыдущую папку парсинга после успешного завершения
-        print(f"\n=== ОЧИСТКА СТАРЫХ ДАННЫХ ===")
-        print("Ожидание 3 секунды перед удалением предыдущих файлов...")
-        time.sleep(3)
+        # Очищаем всю output папку, оставляя только текущую
+        print(f"\n=== ОЧИСТКА OUTPUT ПАПКИ ===")
+        print("Ожидание 2 секунды перед очисткой...")
+        time.sleep(2)
         
-        if self.data_service.delete_previous_parsing_folder():
-            print("✅ Предыдущая папка парсинга удалена")
+        if self.data_service.cleanup_output_folder():
+            print("✅ Output папка очищена, осталась только текущая папка")
         else:
-            print("⚠️ Не удалось удалить предыдущую папку или она не существует")
+            print("⚠️ Не удалось полностью очистить output папку")
         
         print("✅ Цикл мониторинга завершен")
         return comparison_results

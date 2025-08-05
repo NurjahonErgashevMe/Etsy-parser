@@ -17,89 +17,66 @@ from models.product import Product
 import os
 
 class ParserLock:
-    """Класс для управления блокировкой парсера"""
+    """Класс для управления блокировкой парсера через config.txt"""
     
-    def __init__(self, lock_file="parser.lock"):
-        self.lock_file = lock_file
+    def __init__(self):
+        self.config_file = "config.txt"
     
     def is_running(self) -> bool:
-        """Проверяет, запущен ли парсер"""
-        if not os.path.exists(self.lock_file):
-            return False
-        
-        try:
-            with open(self.lock_file, 'r') as f:
-                status = f.read().strip()
-                return status == "working"
-        except Exception:
-            return False
+        """Проверяет, запущен ли парсер согласно config.txt"""
+        from config.settings import is_parser_working
+        return is_parser_working()
     
     def set_working(self):
-        """Устанавливает статус 'working'"""
-        try:
-            with open(self.lock_file, 'w') as f:
-                f.write("working")
-        except Exception as e:
-            logging.error(f"Ошибка установки блокировки: {e}")
+        """Устанавливает статус 'start' в config.txt"""
+        self._update_config_value("is_working", "start")
     
     def set_stopped(self):
-        """Устанавливает статус 'stop'"""
-        try:
-            with open(self.lock_file, 'w') as f:
-                f.write("stop")
-        except Exception as e:
-            logging.error(f"Ошибка снятия блокировки: {e}")
+        """Устанавливает статус 'stop' в config.txt"""
+        self._update_config_value("is_working", "stop")
     
     def get_status(self) -> str:
-        """Получает текущий статус"""
-        if not os.path.exists(self.lock_file):
-            return "stop"
-        
+        """Получает текущий статус из config.txt"""
+        from config.settings import read_config_file
+        config_data = read_config_file()
+        return config_data.get('is_working', 'stop')
+    
+    def _update_config_value(self, key: str, value: str):
+        """Обновляет значение в config.txt"""
         try:
-            with open(self.lock_file, 'r') as f:
-                return f.read().strip()
-        except Exception:
-            return "stop"
+            # Читаем текущий конфиг
+            lines = []
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+            
+            # Обновляем или добавляем значение
+            updated = False
+            for i, line in enumerate(lines):
+                if line.strip().startswith(f"{key}="):
+                    lines[i] = f"{key}={value}\n"
+                    updated = True
+                    break
+            
+            if not updated:
+                lines.append(f"{key}={value}\n")
+            
+            # Записываем обратно
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                f.writelines(lines)
+                
+        except Exception as e:
+            logging.error(f"Ошибка обновления config.txt: {e}")
     
     def force_stop(self):
-        """Принудительно останавливает парсер и очищает сессию"""
+        """Принудительно останавливает парсер"""
         try:
-            # Устанавливаем статус остановки
             self.set_stopped()
-            
-            # Очищаем папку текущей сессии парсинга
-            self.cleanup_current_session()
-            
             logging.info("Парсер принудительно остановлен")
             return True
         except Exception as e:
             logging.error(f"Ошибка принудительной остановки: {e}")
             return False
-    
-    def cleanup_current_session(self):
-        """Очищает файлы текущей сессии парсинга"""
-        try:
-            import shutil
-            from config.settings import config
-            
-            output_dir = config.output_dir
-            if os.path.exists(output_dir):
-                # Находим папку текущей сессии (самую новую)
-                session_dirs = [d for d in os.listdir(output_dir) 
-                               if os.path.isdir(os.path.join(output_dir, d)) and d.startswith('parsing_')]
-                
-                if session_dirs:
-                    # Сортируем по времени создания и берем самую новую
-                    session_dirs.sort(key=lambda x: os.path.getctime(os.path.join(output_dir, x)), reverse=True)
-                    current_session = session_dirs[0]
-                    session_path = os.path.join(output_dir, current_session)
-                    
-                    # Удаляем папку сессии
-                    shutil.rmtree(session_path)
-                    logging.info(f"Удалена папка сессии: {session_path}")
-                    
-        except Exception as e:
-            logging.error(f"Ошибка очистки сессии: {e}")
 
 class LoggingEtsyMonitor:
     """Обертка для EtsyMonitor с поддержкой логирования"""
@@ -148,9 +125,8 @@ class LoggingEtsyMonitor:
             all_shop_products = self.parse_all_shops_with_logging(links)
             
             # Проверяем, не был ли парсинг остановлен принудительно
-            from bot.scheduler_integration import ParserLock
-            parser_lock = ParserLock()
-            if not parser_lock.is_running():
+            from config.settings import is_parser_working
+            if not is_parser_working():
                 self.log_sync("🛑 Парсинг был остановлен принудительно")
                 return []
             
@@ -204,8 +180,8 @@ class LoggingEtsyMonitor:
             else:
                 self.log_sync("📭 Новых товаров не найдено")
             
-            # Удаляем предыдущую папку парсинга
-            if self.monitor.data_service.delete_previous_parsing_folder():
+            # Очищаем всю output папку
+            if self.monitor.data_service.cleanup_output_folder():
                 self.log_sync("🧹 Очистка завершена")
             
             return comparison_results
@@ -221,9 +197,8 @@ class LoggingEtsyMonitor:
         
         for i, url in enumerate(urls, 1):
             # Проверяем, не был ли парсинг остановлен принудительно
-            from bot.scheduler_integration import ParserLock
-            parser_lock = ParserLock()
-            if not parser_lock.is_running():
+            from config.settings import is_parser_working
+            if not is_parser_working():
                 self.log_sync("🛑 Парсинг остановлен пользователем")
                 break
             

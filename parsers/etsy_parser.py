@@ -7,6 +7,7 @@
 """
 import re
 import time
+import logging
 from typing import List, Optional
 from bs4 import BeautifulSoup
 from parsers.base_parser import BaseParser
@@ -45,12 +46,12 @@ class EtsyParser(BaseParser):
         
         # Загружаем первую страницу
         if not self._load_first_page_with_browser_retry(shop_url):
-            print("❌ Не удалось загрузить первую страницу после всех попыток")
+            logging.info("❌ Не удалось загрузить первую страницу после всех попыток")
             return []
         
         # Теперь парсим все страницы
         while current_url:
-            print(f"📄 Парсим страницу {page_num}: {current_url}")
+            logging.info(f"📄 Парсим страницу {page_num}: {current_url}")
             
             # Парсим текущую страницу с обработкой ошибок
             products = self._parse_single_page_with_retry(current_url, page_num == 1)
@@ -58,20 +59,20 @@ class EtsyParser(BaseParser):
             if products is None:  # Требуется перезапуск браузера
                 if browser_restart_count < max_browser_restarts:
                     browser_restart_count += 1
-                    print(f"🔄 Перезапуск браузера #{browser_restart_count}/{max_browser_restarts}")
+                    logging.info(f"🔄 Перезапуск браузера #{browser_restart_count}/{max_browser_restarts}")
                     
                     if self._restart_browser_and_continue(current_url):
-                        print("✅ Браузер перезапущен, продолжаем с текущей страницы")
+                        logging.info("✅ Браузер перезапущен, продолжаем с текущей страницы")
                         continue  # Повторяем попытку с той же страницей
                     else:
-                        print("❌ Не удалось перезапустить браузер")
+                        logging.info("❌ Не удалось перезапустить браузер")
                         break
                 else:
-                    print(f"❌ Превышено максимальное количество перезапусков браузера ({max_browser_restarts})")
+                    logging.info(f"❌ Превышено максимальное количество перезапусков браузера ({max_browser_restarts})")
                     break
             elif products:
                 all_products.extend(products)
-                print(f"✅ Найдено товаров на странице {page_num}: {len(products)}")
+                logging.info(f"✅ Найдено товаров на странице {page_num}: {len(products)}")
                 browser_restart_count = 0  # Сбрасываем счетчик при успешном парсинге
                 
                 # Получаем URL следующей страницы
@@ -82,13 +83,13 @@ class EtsyParser(BaseParser):
                     # Минимальная пауза между страницами
                     time.sleep(1)
                 else:
-                    print("📋 Следующая страница не найдена, завершаем парсинг")
+                    logging.info("📋 Следующая страница не найдена, завершаем парсинг")
                     break
             else:
-                print(f"⚠️ Товары не найдены на странице {page_num}")
+                logging.info(f"⚠️ Товары не найдены на странице {page_num}")
                 break
         
-        print(f"🎉 Всего найдено товаров: {len(all_products)} на {page_num} страницах")
+        logging.info(f"🎉 Всего найдено товаров: {len(all_products)} на {page_num} страницах")
         
         # Закрываем браузер
         if self.browser_service:
@@ -107,12 +108,12 @@ class EtsyParser(BaseParser):
             if self.browser_service.setup_driver():
                 return True
             else:
-                print(f"❌ Попытка {attempt + 1}/3 запуска браузера не удалась")
+                logging.info(f"❌ Попытка {attempt + 1}/3 запуска браузера не удалась")
                 if attempt < 2:
                     time.sleep(2)
                     self.browser_service.restart_browser()
                 else:
-                    print("❌ Не удалось запустить браузер после 3 попыток")
+                    logging.info("❌ Не удалось запустить браузер после 3 попыток")
                     return False
         return False
     
@@ -121,26 +122,26 @@ class EtsyParser(BaseParser):
         max_browser_restarts = 3
         
         for browser_restart in range(max_browser_restarts):
-            print(f"🚀 Попытка загрузки первой страницы (перезапуск браузера {browser_restart + 1}/{max_browser_restarts})")
+            logging.info(f"🚀 Попытка загрузки первой страницы (перезапуск браузера {browser_restart + 1}/{max_browser_restarts})")
             
             # Используем новый метод с обработкой 403
             success, need_browser_restart = self.browser_service.load_page_with_403_handling(shop_url)
             
             if success:
-                print("✅ Первая страница успешно загружена")
+                logging.info("✅ Первая страница успешно загружена")
                 return True
             elif need_browser_restart:
-                print(f"🔄 Требуется перезапуск браузера (попытка {browser_restart + 1}/{max_browser_restarts})")
+                logging.info(f"🔄 Требуется перезапуск браузера (попытка {browser_restart + 1}/{max_browser_restarts})")
                 if browser_restart < max_browser_restarts - 1:
                     if not self.browser_service.restart_browser():
-                        print("❌ Не удалось перезапустить браузер")
+                        logging.info("❌ Не удалось перезапустить браузер")
                         return False
                     time.sleep(2)
                 else:
-                    print("❌ Превышено максимальное количество перезапусков браузера")
+                    logging.info("❌ Превышено максимальное количество перезапусков браузера")
                     return False
             else:
-                print("❌ Не удалось загрузить первую страницу")
+                logging.info("❌ Не удалось загрузить первую страницу")
                 return False
         
         return False
@@ -150,7 +151,7 @@ class EtsyParser(BaseParser):
         try:
             return self._parse_single_page_with_browser(page_url, is_first_page)
         except Exception as e:
-            print(f"❌ Критическая ошибка при парсинге страницы: {e}")
+            logging.error(f"❌ Критическая ошибка при парсинге страницы: {e}")
             return None  # Сигнал для перезапуска браузера
     
     def _restart_browser_and_continue(self, current_url: str) -> bool:
@@ -164,23 +165,23 @@ class EtsyParser(BaseParser):
         if success:
             return True
         elif need_browser_restart:
-            print("❌ Получен 403 даже после перезапуска браузера")
+            logging.info("❌ Получен 403 даже после перезапуска браузера")
             return False
         else:
-            print("❌ Не удалось загрузить страницу после перезапуска браузера")
+            logging.info("❌ Не удалось загрузить страницу после перезапуска браузера")
             return False
     
     def _load_first_page_with_browser(self, shop_url: str) -> bool:
         """Загружает первую страницу через браузер"""
-        print(f"🌐 Загружаем первую страницу через браузер: {shop_url}")
+        logging.info(f"🌐 Загружаем первую страницу через браузер: {shop_url}")
         
         # Пытаемся загрузить страницу с повторными попытками
         if self.browser_service.load_page_with_retries(shop_url):
-            print("✅ Первая страница успешно загружена")
+            logging.info("✅ Первая страница успешно загружена")
             return True
         else:
             # Пробуем перезапустить браузер
-            print("🔄 Пытаемся перезапустить браузер...")
+            logging.info("🔄 Пытаемся перезапустить браузер...")
             if self.browser_service.restart_browser():
                 return self.browser_service.load_page_with_retries(shop_url)
             
@@ -194,23 +195,23 @@ class EtsyParser(BaseParser):
                 success, need_browser_restart = self.browser_service.load_page_with_403_handling(page_url)
                 if not success:
                     if need_browser_restart:
-                        print(f"❌ Получен 403 при переходе на страницу: {page_url}")
+                        logging.info(f"❌ Получен 403 при переходе на страницу: {page_url}")
                         return None  # Сигнал для перезапуска браузера
                     else:
-                        print(f"❌ Не удалось перейти на страницу: {page_url}")
+                        logging.info(f"❌ Не удалось перейти на страницу: {page_url}")
                         return []
                 time.sleep(1)  # Быстрая загрузка
         
         # Проверяем на блокировку и обрабатываем её (дополнительная проверка)
         if not self._handle_blocking_with_retries(page_url):
-            print("❌ Не удалось обойти блокировку после всех попыток")
+            logging.info("❌ Не удалось обойти блокировку после всех попыток")
             return None  # Сигнал для перезапуска браузера
         
         # Получаем HTML контент из браузера
         html_content = self.browser_service.get_page_source()
         
         if not html_content:
-            print("❌ Не удалось получить HTML контент")
+            logging.info("❌ Не удалось получить HTML контент")
             return []
         
         # Парсим HTML
@@ -220,7 +221,7 @@ class EtsyParser(BaseParser):
         listing_grid = soup.find('div', {'data-appears-component-name': 'shop_home_listing_grid'})
         
         if not listing_grid:
-            print("⚠️ Не найден контейнер с товарами")
+            logging.info("⚠️ Не найден контейнер с товарами")
             return []
         
         # Ищем все ссылки с data-listing-id
@@ -236,7 +237,7 @@ class EtsyParser(BaseParser):
                     products.append(product)
                     
             except Exception as e:
-                print(f"❌ Ошибка при парсинге товара: {e}")
+                logging.error(f"❌ Ошибка при парсинге товара: {e}")
                 continue
         
         # После парсинга товаров делаем плавный скролл к пагинации
@@ -247,8 +248,8 @@ class EtsyParser(BaseParser):
     def _handle_blocking_with_retries(self, page_url: str) -> bool:
         """Проверяет на блокировку. При обнаружении блокировки сразу требует перезапуск браузера"""
         if self._check_for_blocking():
-            print("🚫 БЛОКИРОВКА ОБНАРУЖЕНА! Перезагрузка страницы не поможет")
-            print("🔄 Требуется перезапуск браузера с новым IP/сессией")
+            logging.info("🚫 БЛОКИРОВКА ОБНАРУЖЕНА! Перезагрузка страницы не поможет")
+            logging.info("🔄 Требуется перезапуск браузера с новым IP/сессией")
             return False  # Сигнал для перезапуска браузера
         else:
             # Блокировки нет, все в порядке
@@ -281,19 +282,19 @@ class EtsyParser(BaseParser):
             # Проверяем фразы блокировки
             for phrase in blocking_phrases:
                 if phrase in page_source:
-                    print(f"🚫 БЛОКИРОВКА ОБНАРУЖЕНА! Найдена фраза: '{phrase}'")
+                    logging.info(f"🚫 БЛОКИРОВКА ОБНАРУЖЕНА! Найдена фраза: '{phrase}'")
                     return True
             
             # Дополнительная проверка на отсутствие основного контента
             if 'shop_home_listing_grid' not in page_source and len(page_source) < 10000:
-                print("🚫 Подозрение на блокировку: слишком мало контента и нет основных элементов")
+                logging.info("🚫 Подозрение на блокировку: слишком мало контента и нет основных элементов")
                 return True
             
-            print("✅ Признаков блокировки не обнаружено")
+            logging.info("✅ Признаков блокировки не обнаружено")
             return False
             
         except Exception as e:
-            print(f"⚠️ Ошибка при проверке блокировки: {e}")
+            logging.error(f"⚠️ Ошибка при проверке блокировки: {e}")
             return False
     
     def _get_next_page_url_from_browser(self) -> Optional[str]:
@@ -307,13 +308,13 @@ class EtsyParser(BaseParser):
         # Ищем навигацию пагинации
         pagination_nav = soup.find('nav', {'data-clg-id': 'WtPagination'})
         if not pagination_nav:
-            print("📋 Пагинация не найдена")
+            logging.info("📋 Пагинация не найдена")
             return None
         
         # Ищем все ссылки пагинации
         pagination_links = pagination_nav.find_all('a', class_='wt-action-group__item')
         
-        print(f"🔍 DEBUG: Найдено {len(pagination_links)} ссылок пагинации")
+        logging.info(f"🔍 DEBUG: Найдено {len(pagination_links)} ссылок пагинации")
         
         # Выводим отладочную информацию о всех ссылках
         for i, link in enumerate(pagination_links):
@@ -323,7 +324,7 @@ class EtsyParser(BaseParser):
             href = link.get('href')
             is_disabled = 'wt-is-disabled' in link.get('class', [])
             
-            print(f"🔍 DEBUG: Ссылка {i}: текст='{page_num}', data-page='{data_page}', aria-current='{aria_current}', disabled={is_disabled}")
+            logging.info(f"🔍 DEBUG: Ссылка {i}: текст='{page_num}', data-page='{data_page}', aria-current='{aria_current}', disabled={is_disabled}")
         
         # Находим текущую страницу (с aria-current="true")
         current_page_found = False
@@ -334,7 +335,7 @@ class EtsyParser(BaseParser):
                 current_page_found = True
                 current_page_index = i
                 current_page_text = link.get_text(strip=True)
-                print(f"✅ DEBUG: Найдена текущая страница {current_page_text} на позиции {i}")
+                logging.info(f"✅ DEBUG: Найдена текущая страница {current_page_text} на позиции {i}")
                 
                 # Проверяем, есть ли следующая ссылка
                 if i + 1 < len(pagination_links):
@@ -343,33 +344,33 @@ class EtsyParser(BaseParser):
                     next_page_text = next_link.get_text(strip=True)
                     is_next_disabled = 'wt-is-disabled' in next_link.get('class', [])
                     
-                    print(f"🔍 DEBUG: Следующая ссылка: текст='{next_page_text}', disabled={is_next_disabled}")
+                    logging.info(f"🔍 DEBUG: Следующая ссылка: текст='{next_page_text}', disabled={is_next_disabled}")
                     
                     if next_href and next_link.get('data-page') and not is_next_disabled:
                         # Формируем полный URL
                         if next_href.startswith('http'):
-                            print(f"➡️ Найдена следующая страница: {next_href}")
+                            logging.info(f"➡️ Найдена следующая страница: {next_href}")
                             return next_href
                         else:
                             full_url = f"https://www.etsy.com{next_href}"
-                            print(f"➡️ Найдена следующая страница: {full_url}")
+                            logging.info(f"➡️ Найдена следующая страница: {full_url}")
                             return full_url
                     else:
-                        print(f"⚠️ DEBUG: Следующая ссылка недоступна (href={bool(next_href)}, data-page={bool(next_link.get('data-page'))}, disabled={is_next_disabled})")
+                        logging.info(f"⚠️ DEBUG: Следующая ссылка недоступна (href={bool(next_href)}, data-page={bool(next_link.get('data-page'))}, disabled={is_next_disabled})")
                 else:
-                    print("⚠️ DEBUG: Текущая страница последняя в списке")
+                    logging.info("⚠️ DEBUG: Текущая страница последняя в списке")
                 break
         
         # Если текущая страница не найдена, ищем кнопку "Следующая страница"
         if not current_page_found:
-            print("⚠️ DEBUG: Текущая страница не найдена, ищем кнопку 'Следующая страница'")
+            logging.info("⚠️ DEBUG: Текущая страница не найдена, ищем кнопку 'Следующая страница'")
             for i, link in enumerate(pagination_links):
                 if link.get('data-page'):
                     # Проверяем, это ли кнопка "следующая"
                     screen_reader_text = link.find('span', class_='wt-screen-reader-only')
                     if screen_reader_text:
                         sr_text = screen_reader_text.get_text()
-                        print(f"🔍 DEBUG: Screen reader текст ссылки {i}: '{sr_text}'")
+                        logging.info(f"🔍 DEBUG: Screen reader текст ссылки {i}: '{sr_text}'")
                         
                         if 'Следующая страница' in sr_text or 'Next page' in sr_text:
                             next_href = link.get('href')
@@ -377,16 +378,16 @@ class EtsyParser(BaseParser):
                             
                             if next_href and not is_disabled:
                                 if next_href.startswith('http'):
-                                    print(f"➡️ Найдена следующая страница через кнопку: {next_href}")
+                                    logging.info(f"➡️ Найдена следующая страница через кнопку: {next_href}")
                                     return next_href
                                 else:
                                     full_url = f"https://www.etsy.com{next_href}"
-                                    print(f"➡️ Найдена следующая страница через кнопку: {full_url}")
+                                    logging.info(f"➡️ Найдена следующая страница через кнопку: {full_url}")
                                     return full_url
                             else:
-                                print(f"⚠️ DEBUG: Кнопка 'Следующая страница' отключена или без href")
+                                logging.info(f"⚠️ DEBUG: Кнопка 'Следующая страница' отключена или без href")
         
-        print("📋 DEBUG: Следующая страница действительно не найдена - это последняя страница")
+        logging.info("📋 DEBUG: Следующая страница действительно не найдена - это последняя страница")
         return None
     
     def _scroll_to_pagination(self):
@@ -395,7 +396,7 @@ class EtsyParser(BaseParser):
             if not self.browser_service or not self.browser_service.driver:
                 return
             
-            print("🖱️ Быстрый скролл к пагинации...")
+            logging.info("🖱️ Быстрый скролл к пагинации...")
             
             # Ищем элемент пагинации и скроллим мгновенно
             pagination_script = """
@@ -431,15 +432,15 @@ class EtsyParser(BaseParser):
             pagination_found = self.browser_service.driver.execute_script(pagination_script)
             
             if pagination_found:
-                print("✅ Быстрый скролл к пагинации выполнен")
+                logging.info("✅ Быстрый скролл к пагинации выполнен")
             else:
-                print("⚠️ Пагинация не найдена, выполнен скролл вниз страницы")
+                logging.info("⚠️ Пагинация не найдена, выполнен скролл вниз страницы")
             
             # Минимальное ожидание загрузки пагинации
             time.sleep(0.5)
             
         except Exception as e:
-            print(f"⚠️ Ошибка при скролле к пагинации: {e}")
+            logging.error(f"⚠️ Ошибка при скролле к пагинации: {e}")
     
     def _parse_product_element(self, link_element, shop_name: str) -> Product:
         """Парсит элемент товара"""
