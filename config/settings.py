@@ -50,7 +50,12 @@ class AppConfig:
     # Google Sheets настройки
     google_sheets_enabled: bool = True
     google_sheets_credentials: str = "credentials.json"
-    google_sheets_spreadsheet_id: str = "1YT4JqyDd6s3n4MZVle2MxyrN9PDnHlmYxSsIhNUU6jY"
+    
+    @property
+    def google_sheets_spreadsheet_id(self) -> str:
+        """Получает ID Google Sheets из config.txt"""
+        config_data = read_config_file()
+        return config_data.get('google_sheets_spreadsheet_id', '1YT4JqyDd6s3n4MZVle2MxyrN9PDnHlmYxSsIhNUU6jY')
     
     # Настройки планировщика
     scheduler_enabled: bool = True
