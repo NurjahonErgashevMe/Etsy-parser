@@ -5,6 +5,7 @@ import time
 import json
 import os
 import tempfile
+import logging
 from typing import Dict, Optional, List
 try:
     from seleniumwire import webdriver
@@ -41,7 +42,7 @@ class BrowserService:
         import os
         import subprocess
         
-        print("🔍 Проверяем установку Google Chrome...")
+        logging.info("🔍 Проверяем установку Google Chrome...")
         
         # Возможные пути к Chrome на Windows
         chrome_paths = [
@@ -53,7 +54,7 @@ class BrowserService:
         # Проверяем наличие файла Chrome
         for path in chrome_paths:
             if os.path.exists(path):
-                print(f"✅ Chrome найден: {path}")
+                logging.info(f"✅ Chrome найден: {path}")
                 return True
         
         # Пытаемся запустить chrome через командную строку
@@ -61,14 +62,14 @@ class BrowserService:
             result = subprocess.run(["chrome", "--version"], 
                                   capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
-                print(f"✅ Chrome найден в PATH: {result.stdout.strip()}")
+                logging.info(f"✅ Chrome найден в PATH: {result.stdout.strip()}")
                 return True
         except:
             pass
         
-        print("❌ Google Chrome не найден!")
-        print("💡 Установите Google Chrome: https://www.google.com/chrome/")
-        print("💡 Или убедитесь, что Chrome установлен в стандартной папке")
+        logging.error("❌ Google Chrome не найден!")
+        logging.error("💡 Установите Google Chrome: https://www.google.com/chrome/")
+        logging.error("💡 Или убедитесь, что Chrome установлен в стандартной папке")
         return False
         
     def setup_driver(self, use_proxy: bool = True):
@@ -81,11 +82,11 @@ class BrowserService:
         if use_proxy:
             self.current_proxy = self.proxy_manager.get_random_proxy()
             if not self.current_proxy:
-                print("❌ Не удалось получить прокси!")
+                logging.error("❌ Не удалось получить прокси!")
                 return False
-            print(f"🌐 Используем случайный прокси: {self.current_proxy['host']}:{self.current_proxy['port']}")
+            logging.info(f"🌐 Используем случайный прокси: {self.current_proxy['host']}:{self.current_proxy['port']}")
         else:
-            print("🌐 Запуск без прокси")
+            logging.info("🌐 Запуск без прокси")
             
         chrome_options = Options()
         
@@ -124,9 +125,11 @@ class BrowserService:
         chrome_options.add_argument("--aggressive-cache-discard")
         chrome_options.add_argument("--memory-pressure-off")
         
-        # Включаем логирование сетевых запросов
+        # Включаем логирование сетевых запросов, но подавляем ошибки GPU
         chrome_options.add_argument("--enable-logging")
-        chrome_options.add_argument("--log-level=0")
+        chrome_options.add_argument("--log-level=3")  # Только фатальные ошибки
+        chrome_options.add_argument("--disable-logging")
+        chrome_options.add_argument("--disable-gpu-logging")
         chrome_options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
         
         # Дополнительные опции для блокировки ненужных ресурсов
@@ -148,7 +151,11 @@ class BrowserService:
         
         # Дополнительные опции для стабильности
         chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--disable-gpu-sandbox")
+        chrome_options.add_argument("--disable-software-rasterizer")
         chrome_options.add_argument("--disable-plugins")
+        chrome_options.add_argument("--no-first-run")
+        chrome_options.add_argument("--disable-default-apps")
         
         # Настройка прокси
         seleniumwire_options = None
@@ -159,12 +166,12 @@ class BrowserService:
                 self._setup_proxy_options(chrome_options)
         
         try:
-            print("🔧 Устанавливаем ChromeDriver...")
+            logging.info("🔧 Устанавливаем ChromeDriver...")
             
             # Пытаемся установить ChromeDriver с обработкой ошибок
             try:
                 driver_path = ChromeDriverManager().install()
-                print(f"✅ ChromeDriver путь: {driver_path}")
+                logging.info(f"✅ ChromeDriver путь: {driver_path}")
                 
                 # Проверяем, что путь указывает на правильный файл
                 if not driver_path.endswith('chromedriver.exe'):
@@ -173,18 +180,18 @@ class BrowserService:
                     chromedriver_exe = os.path.join(driver_dir, 'chromedriver.exe')
                     if os.path.exists(chromedriver_exe):
                         driver_path = chromedriver_exe
-                        print(f"🔧 Исправлен путь к ChromeDriver: {driver_path}")
+                        logging.info(f"🔧 Исправлен путь к ChromeDriver: {driver_path}")
                     else:
-                        print(f"❌ chromedriver.exe не найден в {driver_dir}")
+                        logging.error(f"❌ chromedriver.exe не найден в {driver_dir}")
                         raise Exception("ChromeDriver executable not found")
                 
                 service = Service(driver_path)
             except Exception as e:
-                print(f"❌ Ошибка установки ChromeDriver: {e}")
-                print("🔄 Пытаемся использовать системный ChromeDriver...")
+                logging.error(f"❌ Ошибка установки ChromeDriver: {e}")
+                logging.info("🔄 Пытаемся использовать системный ChromeDriver...")
                 service = Service()  # Попробуем системный драйвер
             
-            print("🚀 Запускаем Chrome браузер...")
+            logging.info("🚀 Запускаем Chrome браузер...")
             if seleniumwire_options:
                 self.driver = webdriver.Chrome(
                     service=service, 
@@ -215,28 +222,36 @@ class BrowserService:
             if use_proxy and self.current_proxy:
                 self._verify_proxy_ip()
             
-            print("✅ Браузер успешно запущен в stealth режиме с имитацией человека")
+            logging.info("✅ Браузер успешно запущен в stealth режиме с имитацией человека")
             return True
             
         except Exception as e:
-            print(f"❌ Ошибка при запуске браузера: {e}")
+            logging.error(f"❌ Ошибка при запуске браузера: {e}")
+            logging.error(f"❌ Тип ошибки: {type(e).__name__}")
+            logging.error(f"❌ Подробности ошибки: {str(e)}")
             
             # Очищаем временные файлы прокси при ошибке
             self._cleanup_proxy_extension()
             
             # Пытаемся диагностировать проблему
             if "WinError 193" in str(e):
-                print("🔍 Диагностика: Проблема с исполняемым файлом Chrome")
-                print("💡 Возможные решения:")
-                print("   1. Установите Google Chrome: https://www.google.com/chrome/")
-                print("   2. Перезапустите терминал/IDE")
-                print("   3. Проверьте PATH переменную")
+                logging.error("🔍 Диагностика: Проблема с исполняемым файлом Chrome")
+                logging.error("💡 Возможные решения:")
+                logging.error("   1. Установите Google Chrome: https://www.google.com/chrome/")
+                logging.error("   2. Перезапустите терминал/IDE")
+                logging.error("   3. Проверьте PATH переменную")
             elif "chromedriver" in str(e).lower():
-                print("🔍 Диагностика: Проблема с ChromeDriver")
-                print("💡 Попробуйте переустановить ChromeDriver")
+                logging.error("🔍 Диагностика: Проблема с ChromeDriver")
+                logging.error("💡 Попробуйте переустановить ChromeDriver")
             elif "proxy" in str(e).lower():
-                print("🔍 Диагностика: Проблема с прокси")
-                print("💡 Проверьте настройки прокси в proxies.txt")
+                logging.error("🔍 Диагностика: Проблема с прокси")
+                logging.error("💡 Проверьте настройки прокси в proxies.txt")
+            elif "timeout" in str(e).lower():
+                logging.error("🔍 Диагностика: Таймаут при запуске браузера")
+                logging.error("💡 Возможно, прокси не отвечает или заблокирован")
+            elif "connection" in str(e).lower():
+                logging.error("🔍 Диагностика: Проблема с подключением")
+                logging.error("💡 Проверьте интернет-соединение и прокси")
             
             return False
     
@@ -261,10 +276,10 @@ class BrowserService:
                 });
             """)
             
-            print("🤖 Настроена имитация человеческого поведения")
+            logging.info("🤖 Настроена имитация человеческого поведения")
             
         except Exception as e:
-            print(f"⚠️ Ошибка при настройке имитации человека: {e}")
+            logging.error(f"⚠️ Ошибка при настройке имитации человека: {e}")
     
     def _get_seleniumwire_proxy_options(self):
         """Возвращает настройки прокси для selenium-wire"""
@@ -280,11 +295,19 @@ class BrowserService:
     def _setup_proxy_options(self, chrome_options: Options):
         """Настраивает опции Chrome для работы с прокси"""
         try:
-            # Создаем расширение для аутентификации прокси
-            self.proxy_extension_path = self.proxy_manager.get_proxy_auth_extension(self.current_proxy)
-            
-            # Добавляем расширение в Chrome (должно быть до других опций)
-            chrome_options.add_extension(self.proxy_extension_path)
+            # Пробуем создать расширение для аутентификации прокси
+            try:
+                self.proxy_extension_path = self.proxy_manager.get_proxy_auth_extension(self.current_proxy)
+                # Добавляем расширение в Chrome (должно быть до других опций)
+                chrome_options.add_extension(self.proxy_extension_path)
+                logging.info("✅ Расширение прокси создано и добавлено")
+            except Exception as ext_error:
+                logging.warning(f"⚠️ Не удалось создать расширение прокси: {ext_error}")
+                logging.info("🔄 Используем альтернативный метод настройки прокси")
+                
+                # Альтернативный способ - только через аргументы командной строки
+                # В этом случае может потребоваться ручная аутентификация
+                pass
             
             # Настройка прокси через аргументы командной строки
             proxy_server = f"{self.current_proxy['host']}:{self.current_proxy['port']}"
@@ -302,16 +325,16 @@ class BrowserService:
             # Отключаем диалоги аутентификации
             chrome_options.add_argument("--disable-features=VizDisplayCompositor")
             
-            print(f"🔧 Настроен прокси: {self.current_proxy['host']}:{self.current_proxy['port']}")
+            logging.info(f"🔧 Настроен прокси: {self.current_proxy['host']}:{self.current_proxy['port']}")
             
         except Exception as e:
-            print(f"❌ Ошибка при настройке прокси: {e}")
+            logging.error(f"❌ Ошибка при настройке прокси: {e}")
             raise e
     
     def _verify_proxy_ip(self):
         """Проверяет текущий IP адрес через прокси"""
         try:
-            print("🔍 Проверяем IP адрес через прокси...")
+            logging.info("🔍 Проверяем IP адрес через прокси...")
             
             # Переходим на сайт для проверки IP
             self.driver.get("https://ip.decodo.com/json")
@@ -320,31 +343,82 @@ class BrowserService:
             # Получаем результат
             page_source = self.driver.page_source
             if "ip" in page_source.lower():
-                print(f"✅ IP проверен через прокси")
+                logging.info(f"✅ IP проверен через прокси")
                 # Можно извлечь IP из JSON если нужно
                 import re
                 ip_match = re.search(r'"ip":\s*"([^"]+)"', page_source)
                 if ip_match:
                     current_ip = ip_match.group(1)
-                    print(f"🌐 Текущий IP: {current_ip}")
+                    logging.info(f"🌐 Текущий IP: {current_ip}")
             else:
-                print("⚠️ Не удалось получить информацию об IP")
+                logging.warning("⚠️ Не удалось получить информацию об IP")
                 
         except Exception as e:
-            print(f"⚠️ Ошибка при проверке IP: {e}")
+            logging.error(f"⚠️ Ошибка при проверке IP: {e}")
+    
+    def _handle_captcha(self, max_wait_time: int = 60) -> bool:
+        """
+        Обрабатывает капчу, ожидая её решения пользователем или автоматически
+        """
+        try:
+            current_url = self.driver.current_url.lower()
+            
+            if 'captcha-delivery.com' not in current_url:
+                return True  # Капчи нет
+            
+            logging.info("🤖 ОБНАРУЖЕНА КАПЧА! Ожидаем решения...")
+            logging.info(f"🔗 URL капчи: {self.driver.current_url}")
+            
+            start_time = time.time()
+            
+            while time.time() - start_time < max_wait_time:
+                try:
+                    current_url = self.driver.current_url.lower()
+                    
+                    # Проверяем, ушли ли мы с капчи
+                    if 'captcha-delivery.com' not in current_url:
+                        logging.info("✅ Капча решена! Продолжаем работу...")
+                        return True
+                    
+                    # Проверяем, не появилась ли кнопка продолжения
+                    try:
+                        continue_buttons = self.driver.find_elements(By.XPATH, 
+                            "//button[contains(text(), 'Continue') or contains(text(), 'Продолжить')]")
+                        if continue_buttons:
+                            logging.info("🔘 Найдена кнопка продолжения, нажимаем...")
+                            continue_buttons[0].click()
+                            time.sleep(3)
+                            continue
+                    except:
+                        pass
+                    
+                    # Ждем немного перед следующей проверкой
+                    time.sleep(2)
+                    
+                except Exception as e:
+                    logging.error(f"⚠️ Ошибка при обработке капчи: {e}")
+                    time.sleep(2)
+            
+            logging.error(f"❌ Капча не была решена за {max_wait_time} секунд")
+            return False
+            
+        except Exception as e:
+            logging.error(f"❌ Ошибка при обработке капчи: {e}")
+            return False
     
     def _cleanup_proxy_extension(self):
         """Очищает временные файлы расширения прокси"""
         try:
             if self.proxy_extension_path and os.path.exists(self.proxy_extension_path):
-                os.remove(self.proxy_extension_path)
-                print("🧹 Временное расширение прокси удалено")
+                # Используем метод из ProxyManager для правильной очистки
+                self.proxy_manager.cleanup_proxy_extension(self.proxy_extension_path)
+                self.proxy_extension_path = None
         except Exception as e:
-            print(f"⚠️ Ошибка при удалении расширения прокси: {e}")
+            logging.error(f"⚠️ Ошибка при удалении расширения прокси: {e}")
     
     def change_proxy(self) -> bool:
         """Меняет прокси на новый и перезапускает браузер"""
-        print("🔄 Смена прокси...")
+        logging.info("🔄 Смена прокси...")
         
         # Закрываем текущий браузер
         self.close_browser()
@@ -352,10 +426,10 @@ class BrowserService:
         # Получаем новый прокси
         self.current_proxy = self.proxy_manager.get_random_proxy()
         if not self.current_proxy:
-            print("❌ Не удалось получить новый прокси!")
+            logging.error("❌ Не удалось получить новый прокси!")
             return False
         
-        print(f"🌐 Новый прокси: {self.current_proxy['host']}:{self.current_proxy['port']}")
+        logging.info(f"🌐 Новый прокси: {self.current_proxy['host']}:{self.current_proxy['port']}")
         
         # Запускаем браузер с новым прокси
         return self.setup_driver(use_proxy=True)
@@ -539,9 +613,16 @@ class BrowserService:
                     WebDriverWait(self.driver, 10).until(
                         EC.presence_of_element_located((By.TAG_NAME, "body"))
                     )
-                    print("📄 Страница загружена, ожидаем успешного запроса...")
+                    logging.info("📄 Страница загружена, ожидаем успешного запроса...")
                 except TimeoutException:
-                    print("⚠️ Страница загружается медленно...")
+                    logging.info("⚠️ Страница загружается медленно...")
+                
+                # Проверяем на капчу и обрабатываем её
+                if 'captcha-delivery.com' in self.driver.current_url.lower():
+                    logging.info("🤖 Обнаружена капча, пытаемся обработать...")
+                    if not self._handle_captcha(max_wait_time=30):
+                        logging.info("❌ Не удалось обработать капчу, требуется смена прокси")
+                        return False, True
                 
                 # Имитируем человеческие действия после загрузки
                 self.simulate_human_actions()
@@ -550,27 +631,27 @@ class BrowserService:
                 success, status = self.wait_for_successful_request(url)
                 
                 if success:
-                    print(f"✅ Страница {shop_name} успешно загружена!")
+                    logging.info(f"✅ Страница {shop_name} успешно загружена!")
                     return True, False
                 elif status == 403:
-                    print(f"🚫 Получен 403 для {shop_name} (попытка {attempt + 1}/{max_403_retries})")
+                    logging.info(f"🚫 Получен 403 для {shop_name} (попытка {attempt + 1}/{max_403_retries})")
                     
                     if attempt < max_403_retries - 1:
-                        print("🔄 Перезагружаем страницу через 5 секунд (возможно капча)...")
-                        time.sleep(5)
+                        logging.info("🔄 Перезагружаем страницу через 10 секунд (возможно капча)...")
+                        time.sleep(10)
                         self.driver.refresh()
                         self._wait_for_page_load()
                         continue
                     else:
-                        print("❌ Получен 403 после 3 попыток - требуется новый браузер")
+                        logging.info("❌ Получен 403 после 3 попыток - требуется новый браузер")
                         return False, True
                 else:
                     # Другие ошибки
-                    print(f"❌ Получен статус {status} для {shop_name}")
+                    logging.info(f"❌ Получен статус {status} для {shop_name}")
                     return False, False
                     
             except WebDriverException as e:
-                print(f"❌ Ошибка WebDriver: {e}")
+                logging.error(f"❌ Ошибка WebDriver: {e}")
                 if attempt < max_403_retries - 1:
                     time.sleep(5)
                 else:

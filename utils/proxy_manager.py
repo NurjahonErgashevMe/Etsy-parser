@@ -21,12 +21,14 @@ class ProxyManager:
                 lines = file.readlines()
             
             self.proxies = []
-            for line in lines:
+            for line_num, line in enumerate(lines, 1):
                 line = line.strip()
                 if line and not line.startswith('#'):
                     proxy_data = self.parse_proxy_line(line)
-                    if proxy_data:
+                    if proxy_data and self.validate_proxy_data(proxy_data):
                         self.proxies.append(proxy_data)
+                    elif proxy_data:
+                        logging.warning(f"⚠️ Невалидный прокси на строке {line_num}: {line}")
             
             logging.info(f"✅ Загружено {len(self.proxies)} прокси из {self.proxy_file_path}")
             
@@ -45,13 +47,18 @@ class ProxyManager:
         """
         try:
             parts = line.split(':')
-            if len(parts) == 4:
-                host, port, username, password = parts
+            if len(parts) >= 4:
+                host = parts[0].strip()
+                port = parts[1].strip()
+                username = parts[2].strip()
+                # Пароль может содержать символы ':', поэтому объединяем оставшиеся части
+                password = ':'.join(parts[3:]).strip()
+                
                 return {
-                    'host': host.strip(),
-                    'port': port.strip(),
-                    'username': username.strip(),
-                    'password': password.strip()
+                    'host': host,
+                    'port': port,
+                    'username': username,
+                    'password': password
                 }
             else:
                 logging.warning(f"⚠️ Неверный формат прокси: {line}")
@@ -79,7 +86,7 @@ class ProxyManager:
         proxy = self.proxies[self.current_proxy_index]
         self.current_proxy_index = (self.current_proxy_index + 1) % len(self.proxies)
         
-        logging.info(f"🔄 Выбран прокси #{self.current_proxy_index}: {proxy['host']}:{proxy['port']}")
+        logging.info(f"🔄 Выбран прокси #{self.current_proxy_index}: {proxy['host']}:{proxy['port']} (user: {proxy['username']})")
         return proxy
     
     def format_proxy_for_chrome(self, proxy_data: Dict[str, str]) -> str:
@@ -103,122 +110,288 @@ class ProxyManager:
     def get_proxy_auth_extension(self, proxy_data: Dict[str, str]) -> str:
         """
         Создает Chrome extension для аутентификации прокси
-        Возвращает путь к созданному расширению
+        Возвращает путь к папке расширения (не zip)
         """
         import os
-        import zipfile
         import tempfile
+        import json
+        import stat
         
-        # Создаем временную папку для расширения
-        extension_dir = tempfile.mkdtemp(prefix="proxy_auth_")
+        # Создаем временную папку для расширения с правильными правами
+        try:
+            extension_dir = tempfile.mkdtemp(prefix="proxy_auth_")
+            # Устанавливаем полные права на папку
+            os.chmod(extension_dir, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
+        except Exception as e:
+            logging.error(f"❌ Ошибка создания папки расширения: {e}")
+            # Пробуем создать в текущей директории
+            import uuid
+            extension_dir = f"proxy_auth_{uuid.uuid4().hex[:8]}"
+            os.makedirs(extension_dir, exist_ok=True)
+            os.chmod(extension_dir, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
         
-        # Создаем manifest.json
-        manifest_content = """{
-    "version": "1.0.0",
-    "manifest_version": 2,
-    "name": "Chrome Proxy Auth",
-    "permissions": [
-        "proxy",
-        "tabs",
-        "unlimitedStorage",
-        "storage",
-        "<all_urls>",
-        "webRequest",
-        "webRequestBlocking",
-        "activeTab"
-    ],
-    "background": {
-        "scripts": ["background.js"],
-        "persistent": true
-    },
-    "minimum_chrome_version":"22.0.0"
-}"""
+        # Экранируем специальные символы в пароле для JavaScript
+        escaped_password = proxy_data['password'].replace('\\', '\\\\').replace('"', '\\"').replace("'", "\\'")
+        escaped_username = proxy_data['username'].replace('\\', '\\\\').replace('"', '\\"').replace("'", "\\'")
         
-        # Создаем background.js
+        # Создаем manifest.json для Manifest V2 (более стабильный для прокси)
+        manifest_content = {
+            "version": "1.0.0",
+            "manifest_version": 2,
+            "name": "Proxy Auth Extension",
+            "permissions": [
+                "proxy",
+                "tabs",
+                "unlimitedStorage",
+                "storage",
+                "<all_urls>",
+                "webRequest",
+                "webRequestBlocking"
+            ],
+            "background": {
+                "scripts": ["background.js"],
+                "persistent": True
+            },
+            "minimum_chrome_version": "22.0.0"
+        }
+        
+        # Создаем background.js с улучшенной обработкой аутентификации
         background_content = f"""
-console.log("Proxy extension starting...");
+// Данные прокси
+const PROXY_HOST = "{proxy_data['host']}";
+const PROXY_PORT = {proxy_data['port']};
+const PROXY_USERNAME = "{escaped_username}";
+const PROXY_PASSWORD = "{escaped_password}";
+
+console.log("🚀 Proxy Auth Extension загружено");
+console.log("📡 Прокси:", PROXY_HOST + ":" + PROXY_PORT);
+console.log("👤 Пользователь:", PROXY_USERNAME);
 
 // Настройка прокси
-var config = {{
+const proxyConfig = {{
     mode: "fixed_servers",
     rules: {{
         singleProxy: {{
             scheme: "http",
-            host: "{proxy_data['host']}",
-            port: parseInt({proxy_data['port']})
+            host: PROXY_HOST,
+            port: PROXY_PORT
         }},
-        bypassList: ["localhost", "127.0.0.1", "*.local"]
+        bypassList: [
+            "localhost",
+            "127.0.0.1",
+            "*.local",
+            "10.*",
+            "192.168.*",
+            "172.16.*",
+            "172.17.*",
+            "172.18.*",
+            "172.19.*",
+            "172.20.*",
+            "172.21.*",
+            "172.22.*",
+            "172.23.*",
+            "172.24.*",
+            "172.25.*",
+            "172.26.*",
+            "172.27.*",
+            "172.28.*",
+            "172.29.*",
+            "172.30.*",
+            "172.31.*"
+        ]
     }}
 }};
 
-// Устанавливаем настройки прокси
-chrome.proxy.settings.set({{value: config, scope: "regular"}}, function() {{
+// Применяем настройки прокси
+chrome.proxy.settings.set({{
+    value: proxyConfig,
+    scope: "regular"
+}}, function() {{
     if (chrome.runtime.lastError) {{
-        console.error("Proxy settings error:", chrome.runtime.lastError);
+        console.error("❌ Ошибка настройки прокси:", chrome.runtime.lastError);
     }} else {{
-        console.log("Proxy settings applied successfully");
+        console.log("✅ Настройки прокси применены успешно");
     }}
 }});
 
-// Обработчик аутентификации - более агрессивный подход
-function handleAuth(details) {{
-    console.log("Proxy authentication requested for:", details.url);
-    console.log("Providing credentials for proxy: {proxy_data['host']}:{proxy_data['port']}");
+// Основной обработчик аутентификации
+function handleProxyAuth(details) {{
+    console.log("🔐 Запрос аутентификации для:", details.url);
+    console.log("🔐 Challenger:", details.challenger);
     
-    return {{
-        authCredentials: {{
-            username: "{proxy_data['username']}",
-            password: "{proxy_data['password']}"
-        }}
-    }};
+    // Проверяем, что это запрос к нашему прокси
+    if (details.challenger && 
+        (details.challenger.host === PROXY_HOST || 
+         details.url.includes(PROXY_HOST))) {{
+        
+        console.log("✅ Предоставляем учетные данные для прокси");
+        return {{
+            authCredentials: {{
+                username: PROXY_USERNAME,
+                password: PROXY_PASSWORD
+            }}
+        }};
+    }}
+    
+    console.log("⚠️ Запрос аутентификации не для нашего прокси, игнорируем");
+    return {{}};
 }}
 
-// Добавляем слушатель для аутентификации с максимальными правами
+// Регистрируем обработчик аутентификации
 chrome.webRequest.onAuthRequired.addListener(
-    handleAuth,
+    handleProxyAuth,
     {{urls: ["<all_urls>"]}},
-    ['blocking']
+    ["blocking"]
 );
 
-// Дополнительный обработчик для перехвата всех запросов аутентификации
+// Дополнительный обработчик для отладки
 chrome.webRequest.onBeforeRequest.addListener(
     function(details) {{
-        console.log("Request to:", details.url);
+        if (details.url.includes("decodo.com") || details.url.includes("etsy.com")) {{
+            console.log("📤 Запрос через прокси:", details.url);
+        }}
     }},
     {{urls: ["<all_urls>"]}},
     []
 );
 
-// Обработчик ошибок
+// Обработчик ошибок прокси
 chrome.webRequest.onErrorOccurred.addListener(
     function(details) {{
-        if (details.error.includes("PROXY")) {{
-            console.error("Proxy error:", details.error, "for URL:", details.url);
+        if (details.error && details.error.toLowerCase().includes("proxy")) {{
+            console.error("❌ Ошибка прокси:", details.error, "URL:", details.url);
         }}
     }},
     {{urls: ["<all_urls>"]}}
 );
 
-console.log("Proxy extension loaded with: {proxy_data['host']}:{proxy_data['port']}");
-console.log("Username: {proxy_data['username']}");
+// Обработчик завершения запросов
+chrome.webRequest.onCompleted.addListener(
+    function(details) {{
+        if (details.url.includes("decodo.com") || details.url.includes("etsy.com")) {{
+            console.log("✅ Запрос завершен:", details.statusCode, details.url);
+        }}
+    }},
+    {{urls: ["<all_urls>"]}}
+);
+
+console.log("🎯 Расширение готово к работе!");
 """
         
-        # Записываем файлы
-        with open(os.path.join(extension_dir, "manifest.json"), "w") as f:
-            f.write(manifest_content)
+        # Записываем файлы с правильными правами
+        try:
+            manifest_path = os.path.join(extension_dir, "manifest.json")
+            with open(manifest_path, "w", encoding='utf-8') as f:
+                json.dump(manifest_content, f, indent=2, ensure_ascii=False)
+            os.chmod(manifest_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
+            
+            background_path = os.path.join(extension_dir, "background.js")
+            with open(background_path, "w", encoding='utf-8') as f:
+                f.write(background_content)
+            os.chmod(background_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
+            
+            logging.info(f"✅ Создано расширение для прокси: {extension_dir}")
+            logging.info(f"📁 Путь к расширению: {extension_dir}")
+            
+            return extension_dir
+            
+        except Exception as e:
+            logging.error(f"❌ Ошибка записи файлов расширения: {e}")
+            # Очищаем папку при ошибке
+            try:
+                import shutil
+                shutil.rmtree(extension_dir, ignore_errors=True)
+            except:
+                pass
+            raise e
+    
+    def get_chrome_args_with_proxy(self, proxy_data: Dict[str, str]) -> List[str]:
+        """
+        Возвращает аргументы командной строки для Chrome с прокси
+        Это более надежный способ, чем расширения
+        """
+        proxy_server = f"{proxy_data['host']}:{proxy_data['port']}"
         
-        with open(os.path.join(extension_dir, "background.js"), "w") as f:
-            f.write(background_content)
+        chrome_args = [
+            f"--proxy-server=http://{proxy_server}",
+            "--disable-web-security",
+            "--disable-features=VizDisplayCompositor",
+            "--disable-extensions-except=",
+            "--disable-plugins-discovery",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-default-apps",
+            "--disable-popup-blocking",
+            "--disable-translate",
+            "--disable-background-timer-throttling",
+            "--disable-renderer-backgrounding",
+            "--disable-device-discovery-notifications",
+            "--disable-background-networking",
+            "--disable-sync",
+            "--metrics-recording-only",
+            "--no-report-upload",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            "--remote-debugging-port=9222"
+        ]
         
-        # Создаем zip архив расширения
-        extension_path = os.path.join(tempfile.gettempdir(), f"proxy_auth_{proxy_data['host']}_{proxy_data['port']}.zip")
+        logging.info(f"🔧 Chrome аргументы для прокси {proxy_server} подготовлены")
+        return chrome_args
+    
+    def create_proxy_auth_script(self, proxy_data: Dict[str, str]) -> str:
+        """
+        Создает JavaScript скрипт для автоматической аутентификации в прокси
+        """
+        script_content = f"""
+// Автоматическая аутентификация прокси
+(function() {{
+    const username = "{proxy_data['username']}";
+    const password = "{proxy_data['password']}";
+    
+    // Перехватываем диалоги аутентификации
+    const originalAlert = window.alert;
+    const originalConfirm = window.confirm;
+    const originalPrompt = window.prompt;
+    
+    // Автоматически заполняем поля аутентификации
+    function autoFillAuth() {{
+        const usernameField = document.querySelector('input[type="text"], input[name*="user"], input[id*="user"]');
+        const passwordField = document.querySelector('input[type="password"], input[name*="pass"], input[id*="pass"]');
         
-        with zipfile.ZipFile(extension_path, 'w') as zip_file:
-            zip_file.write(os.path.join(extension_dir, "manifest.json"), "manifest.json")
-            zip_file.write(os.path.join(extension_dir, "background.js"), "background.js")
+        if (usernameField && passwordField) {{
+            usernameField.value = username;
+            passwordField.value = password;
+            
+            // Ищем кнопку входа
+            const loginButton = document.querySelector('button[type="submit"], input[type="submit"], button:contains("Войти"), button:contains("Login")');
+            if (loginButton) {{
+                loginButton.click();
+            }}
+        }}
+    }}
+    
+    // Запускаем автозаполнение при загрузке страницы
+    if (document.readyState === 'loading') {{
+        document.addEventListener('DOMContentLoaded', autoFillAuth);
+    }} else {{
+        autoFillAuth();
+    }}
+    
+    // Также пробуем через небольшую задержку
+    setTimeout(autoFillAuth, 1000);
+    setTimeout(autoFillAuth, 3000);
+}})();
+"""
         
-        logging.info(f"✅ Создано расширение для прокси: {extension_path}")
-        return extension_path
+        import tempfile
+        import os
+        
+        script_path = os.path.join(tempfile.gettempdir(), "proxy_auth_script.js")
+        with open(script_path, "w", encoding='utf-8') as f:
+            f.write(script_content)
+        
+        logging.info(f"📝 Создан скрипт автоаутентификации: {script_path}")
+        return script_path
     
     def test_proxy(self, proxy_data: Dict[str, str]) -> bool:
         """
@@ -266,3 +439,53 @@ console.log("Username: {proxy_data['username']}");
         
         logging.error("❌ Не найдено рабочих прокси!")
         return None
+    
+    def validate_proxy_data(self, proxy_data: Dict[str, str]) -> bool:
+        """Проверяет валидность данных прокси"""
+        required_fields = ['host', 'port', 'username', 'password']
+        
+        for field in required_fields:
+            if field not in proxy_data or not proxy_data[field]:
+                logging.error(f"❌ Отсутствует поле '{field}' в данных прокси")
+                return False
+        
+        # Проверяем, что порт - число
+        try:
+            port = int(proxy_data['port'])
+            if not (1 <= port <= 65535):
+                logging.error(f"❌ Неверный порт: {proxy_data['port']}")
+                return False
+        except ValueError:
+            logging.error(f"❌ Порт должен быть числом: {proxy_data['port']}")
+            return False
+        
+        return True
+    
+    def cleanup_proxy_extension(self, extension_path: str) -> None:
+        """Очищает временные файлы расширения прокси"""
+        try:
+            import os
+            import shutil
+            if os.path.exists(extension_path):
+                # Сначала пытаемся изменить права доступа для удаления
+                try:
+                    import stat
+                    for root, dirs, files in os.walk(extension_path):
+                        for d in dirs:
+                            os.chmod(os.path.join(root, d), stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
+                        for f in files:
+                            os.chmod(os.path.join(root, f), stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
+                except:
+                    pass  # Игнорируем ошибки chmod
+                
+                shutil.rmtree(extension_path, ignore_errors=True)
+                logging.info(f"🧹 Временное расширение прокси удалено: {extension_path}")
+        except Exception as e:
+            logging.warning(f"⚠️ Ошибка при удалении расширения прокси: {e}")
+    
+    def get_proxy_stats(self) -> Dict[str, int]:
+        """Возвращает статистику по прокси"""
+        return {
+            'total_proxies': len(self.proxies),
+            'current_index': self.current_proxy_index
+        }

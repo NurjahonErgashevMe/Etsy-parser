@@ -259,7 +259,11 @@ class EtsyParser(BaseParser):
                 'something about your browser made us think',
                 'robot in the same network',
                 'blocking javascript',
-                'superhuman speed'
+                'superhuman speed',
+                'captcha-delivery.com',  # Капча от Etsy
+                'geo.captcha-delivery.com',  # Геокапча
+                'ct.captcha-delivery.com',  # Капча скрипты
+                'static.captcha-delivery.com'  # Статические ресурсы капчи
             ]
             
             # Проверяем фразы блокировки
@@ -267,6 +271,12 @@ class EtsyParser(BaseParser):
                 if phrase in page_source:
                     logging.info(f"🚫 БЛОКИРОВКА ОБНАРУЖЕНА! Найдена фраза: '{phrase}'")
                     return True
+            
+            # Проверяем URL на наличие капчи
+            current_url = self.browser_service.driver.current_url.lower()
+            if 'captcha-delivery.com' in current_url:
+                logging.info(f"🚫 КАПЧА ОБНАРУЖЕНА! URL содержит капчу: {current_url}")
+                return True
             
             # Дополнительная проверка на отсутствие основного контента
             if 'shop_home_listing_grid' not in page_source and len(page_source) < 10000:
