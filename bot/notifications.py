@@ -1,6 +1,7 @@
 """
 Система уведомлений для Telegram бота
 """
+import asyncio
 import logging
 from datetime import datetime
 from typing import List
@@ -85,12 +86,18 @@ class NotificationService:
     async def send_message_to_user(self, user_id: int, message: str, parse_mode: str = "HTML") -> bool:
         """Отправка сообщения конкретному пользователю"""
         try:
-            sent_message = await self.bot.send_message(
-                chat_id=user_id,
-                text=message,
-                parse_mode=parse_mode
+            sent_message = await asyncio.wait_for(
+                self.bot.send_message(
+                    chat_id=user_id,
+                    text=message,
+                    parse_mode=parse_mode
+                ),
+                timeout=30
             )
             return sent_message
+        except asyncio.TimeoutError:
+            logging.error(f"Таймаут отправки сообщения пользователю {user_id}")
+            return False
         except Exception as e:
             logging.error(f"Ошибка отправки сообщения пользователю {user_id}: {e}")
             return False
@@ -98,13 +105,19 @@ class NotificationService:
     async def edit_message(self, chat_id: int, message_id: int, new_text: str, parse_mode: str = "HTML") -> bool:
         """Редактирование существующего сообщения"""
         try:
-            await self.bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=new_text,
-                parse_mode=parse_mode
+            await asyncio.wait_for(
+                self.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=new_text,
+                    parse_mode=parse_mode
+                ),
+                timeout=30
             )
             return True
+        except asyncio.TimeoutError:
+            logging.error(f"Таймаут редактирования сообщения")
+            return False
         except Exception as e:
             logging.error(f"Ошибка редактирования сообщения: {e}")
             return False
@@ -126,15 +139,20 @@ class NotificationService:
             sent_count = 0
             for admin_id, _ in admins:
                 try:
-                    await self.bot.send_message(
-                        chat_id=admin_id,
-                        text=message_text,
-                        parse_mode="HTML",
-                        disable_web_page_preview=False
+                    await asyncio.wait_for(
+                        self.bot.send_message(
+                            chat_id=admin_id,
+                            text=message_text,
+                            parse_mode="HTML",
+                            disable_web_page_preview=False
+                        ),
+                        timeout=30
                     )
                     sent_count += 1
                     logging.info(f"Уведомление отправлено администратору {admin_id}")
                     
+                except asyncio.TimeoutError:
+                    logging.error(f"Таймаут отправки администратору {admin_id}")
                 except TelegramForbiddenError:
                     logging.warning(f"Администратор {admin_id} заблокировал бота")
                 except TelegramBadRequest as e:
@@ -177,14 +195,19 @@ class NotificationService:
                 # Отправляем каждому администратору
                 for admin_id, _ in admins:
                     try:
-                        await self.bot.send_message(
-                            chat_id=admin_id,
-                            text=message_text,
-                            parse_mode="HTML",
-                            disable_web_page_preview=False
+                        await asyncio.wait_for(
+                            self.bot.send_message(
+                                chat_id=admin_id,
+                                text=message_text,
+                                parse_mode="HTML",
+                                disable_web_page_preview=False
+                            ),
+                            timeout=30
                         )
                         sent_count += 1
                         
+                    except asyncio.TimeoutError:
+                        logging.error(f"Таймаут отправки администратору {admin_id}")
                     except TelegramForbiddenError:
                         logging.warning(f"Администратор {admin_id} заблокировал бота")
                     except TelegramBadRequest as e:
@@ -195,6 +218,97 @@ class NotificationService:
             logging.info(f"Уведомления о {len(products)} товарах отправлены")
             return sent_count > 0
             
+        except Exception as e:
+            logging.error(f"Ошибка отправки уведомлений о товарах: {e}")
+            return False
+    
+    def _format_notification_message(self, product: Product) -> str:
+        """Форматирование минимального сообщения о новом товаре согласно требованиям"""
+        discovery_time = datetime.now().strftime("%d.%m.%Y %H:%M")
+        
+        # Минимальное сообщение: заголовок, магазин, ссылка, время
+        message = f"""🆕 <b>Найден новый товар в {product.shop_name}</b>
+
+<a href="{product.url}">{product.title[:80]}{'...' if len(product.title) > 80 else ''}</a>
+
+🕐 {discovery_time}"""
+        
+        return message
+    
+    def _format_multiple_products_message(self, shop_name: str, products: List[Product]) -> str:
+        """Форматирование минимального сообщения о нескольких новых товарах"""
+        discovery_time = datetime.now().strftime("%d.%m.%Y %H:%M")
+        
+        message = f"""🆕 <b>Найдено {len(products)} новых товаров в {shop_name}</b>
+
+🕐 {discovery_time}
+
+"""
+        
+        # Показываем максимум 5 товаров в минимальном формате
+        for i, product in enumerate(products[:5]):
+            title = product.title[:60] + '...' if len(product.title) > 60 else product.title
+            message += f"• <a href='{product.url}'>{title}</a>\n"
+        
+        if len(products) > 5:
+            message += f"\n... и еще {len(products) - 5} товаров"
+        
+        return message
+    
+    async def send_parsing_started_notification(self, user_id: int = None) -> bool:
+        """Уведомление о начале парсинга (только инициатору или всем админам)"""
+        try:
+            message = f"""🚀 <b>Запуск парсинга</b>
+
+🔍 Начинаю поиск новых товаров..."""
+            
+            if user_id:
+                # Отправляем только инициатору
+                return await self.send_message_to_user(user_id, message)
+            else:
+                # Отправляем всем админам (автоматический запуск по расписанию)
+                admins = await self.db.get_all_admins()
+                if not admins:
+                    return False
+                
+                for admin_id, _ in admins:
+                    await self.send_message_to_user(admin_id, message)
+                
+                return True
+            
+        except Exception as e:
+            logging.error(f"Ошибка отправки уведомления о начале парсинга: {e}")
+            return False
+    
+    async def send_parsing_completed_notification(self, total_new_products: int, user_id: int = None) -> bool:
+        """Уведомление о завершении парсинга (только инициатору или всем админам)"""
+        try:
+            if total_new_products > 0:
+                message = f"""✅ <b>Парсинг завершен</b>
+
+🆕 Найдено новых товаров: {total_new_products}"""
+            else:
+                message = f"""✅ <b>Парсинг завершен</b>
+
+📭 Новых товаров не найдено"""
+            
+            if user_id:
+                # Отправляем только инициатору
+                return await self.send_message_to_user(user_id, message)
+            else:
+                # Отправляем всем админам (автоматический запуск по расписанию)
+                admins = await self.db.get_all_admins()
+                if not admins:
+                    return False
+                
+                for admin_id, _ in admins:
+                    await self.send_message_to_user(admin_id, message)
+                
+                return True
+            
+        except Exception as e:
+            logging.error(f"Ошибка отправки уведомления о завершении парсинга: {e}")
+            return False           
         except Exception as e:
             logging.error(f"Ошибка отправки уведомлений о товарах: {e}")
             return False

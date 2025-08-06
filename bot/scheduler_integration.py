@@ -6,7 +6,7 @@ import logging
 import schedule
 import time
 import pytz
-from datetime import datetime
+from datetime import datetime, timezone
 from threading import Thread
 from typing import Optional
 
@@ -192,7 +192,7 @@ class LoggingEtsyMonitor:
             return []
     
     def parse_all_shops_with_logging(self, urls):
-        """Парсит все магазины с логированием прогресса"""
+        """Парсит все магазины в одном браузере по очереди"""
         all_shop_products = {}
         
         for i, url in enumerate(urls, 1):
@@ -206,7 +206,7 @@ class LoggingEtsyMonitor:
                 shop_name = self.monitor.parser.get_shop_name_from_url(url)
                 self.log_sync(f"🔄 [{i}/{len(urls)}] Парсим: {shop_name}")
                 
-                # Парсим магазин
+                # Парсим магазин (только первую страницу)
                 products = self.monitor.parser.parse_shop_page(url)
                 
                 if products:
@@ -215,7 +215,7 @@ class LoggingEtsyMonitor:
                     # Сохраняем данные
                     filename = self.monitor.data_service.save_products_to_excel(products, shop_name)
                     
-                    self.log_sync(f"✅ {shop_name}: {len(products)} товаров")
+                    self.log_sync(f"✅ {shop_name}: {len(products)} товаров (первая страница)")
                 else:
                     self.log_sync(f"⚠️ {shop_name}: не удалось получить товары")
                 
@@ -223,6 +223,11 @@ class LoggingEtsyMonitor:
                 shop_name = self.monitor.parser.get_shop_name_from_url(url) if url else "Unknown"
                 self.log_sync(f"❌ Ошибка в {shop_name}: {str(e)[:50]}")
                 logging.error(f"Ошибка парсинга {url}: {e}")
+        
+        # Закрываем браузер после всех магазинов
+        if hasattr(self.monitor.parser, 'close_browser'):
+            self.monitor.parser.close_browser()
+            self.log_sync("🔄 Браузер закрыт")
         
         return all_shop_products
 
@@ -239,6 +244,7 @@ class BotScheduler:
         self.scheduler_thread: Optional[Thread] = None
         self.moscow_tz = pytz.timezone('Europe/Moscow')
         self.parser_lock = ParserLock()
+        self.main_loop = None  # Ссылка на основной event loop
     
     async def scheduled_parsing_job(self, user_id: int = None):
         """Задача парсинга с уведомлениями"""
@@ -375,23 +381,24 @@ class BotScheduler:
     def _schedule_job_wrapper(self):
         """Обертка для запуска асинхронной задачи в синхронном планировщике"""
         try:
-            # Создаем новый event loop для этого потока
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-            # Запускаем асинхронную задачу (без user_id для автоматического запуска)
-            loop.run_until_complete(self.scheduled_parsing_job())
+            if self.main_loop and not self.main_loop.is_closed():
+                # Используем основной event loop бота
+                future = asyncio.run_coroutine_threadsafe(self.scheduled_parsing_job(), self.main_loop)
+                future.result()  # Ждем завершения
+            else:
+                # Фолбэк: создаем новый event loop
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(self.scheduled_parsing_job())
+                finally:
+                    loop.close()
             
         except Exception as e:
             logging.error(f"Ошибка в обертке планировщика: {e}")
-        finally:
-            try:
-                loop.close()
-            except Exception:
-                pass
     
     async def update_schedule(self):
-        """Обновление расписания из базы данных"""
+        """Обновление расписания с умным расчетом времени"""
         try:
             # Очищаем старое расписание
             schedule.clear()
@@ -399,7 +406,11 @@ class BotScheduler:
             # Получаем новые настройки
             schedule_time, schedule_day = await self.db.get_scheduler_settings()
             
-            # Настраиваем новое расписание
+            # Получаем текущее время МСК
+            moscow_time = datetime.now(self.moscow_tz)
+            current_weekday = moscow_time.strftime('%A').lower()
+            
+            # Маппинг дней недели
             day_mapping = {
                 "monday": schedule.every().monday,
                 "tuesday": schedule.every().tuesday,
@@ -411,14 +422,35 @@ class BotScheduler:
             }
             
             if schedule_day in day_mapping:
-                day_mapping[schedule_day].at(schedule_time).do(self._schedule_job_wrapper)
+                # Проверяем, если сегодня тот же день недели
+                if current_weekday == schedule_day:
+                    # Парсим время запуска (с timezone)
+                    schedule_hour, schedule_minute = map(int, schedule_time.split(':'))
+                    schedule_datetime = moscow_time.replace(hour=schedule_hour, minute=schedule_minute, second=0, microsecond=0)
+                    
+                    # Если время еще не прошло сегодня - запускаем сегодня
+                    if moscow_time < schedule_datetime:
+                        # Для запуска сегодня используем специальную логику
+                        # Создаем задачу, которая запустится в указанное время сегодня
+                        job = schedule.every().day.at(schedule_time).do(self._schedule_job_wrapper)
+                        # Принудительно устанавливаем время следующего запуска на сегодня (без timezone)
+                        job.next_run = schedule_datetime.replace(tzinfo=None)
+                        minutes_until = int((schedule_datetime - moscow_time).total_seconds() / 60)
+                        logging.info(f"Умное расписание: запуск СЕГОДНЯ в {schedule_time} (через {minutes_until} мин)")
+                    else:
+                        # Время уже прошло - запускаем на следующей неделе
+                        day_mapping[schedule_day].at(schedule_time).do(self._schedule_job_wrapper)
+                        logging.info(f"Умное расписание: время прошло, запуск на СЛЕДУЮЩЕЙ неделе")
+                else:
+                    # Обычное расписание на другой день недели
+                    day_mapping[schedule_day].at(schedule_time).do(self._schedule_job_wrapper)
+                    logging.info(f"Обычное расписание: {schedule_day} в {schedule_time}")
                 
-                moscow_time = datetime.now(self.moscow_tz)
-                logging.info(f"Расписание обновлено: {schedule_day} в {schedule_time} МСК")
                 logging.info(f"Текущее время МСК: {moscow_time.strftime('%Y-%m-%d %H:%M:%S')}")
                 
                 if schedule.jobs:
-                    logging.info(f"Следующий запуск: {schedule.next_run()}")
+                    next_run = schedule.next_run()
+                    logging.info(f"Следующий запуск: {next_run}")
             else:
                 logging.error(f"Неизвестный день недели: {schedule_day}")
                 
@@ -446,6 +478,9 @@ class BotScheduler:
             return
         
         try:
+            # Сохраняем ссылку на текущий event loop
+            self.main_loop = asyncio.get_event_loop()
+            
             # Обновляем расписание из базы данных
             await self.update_schedule()
             
@@ -481,7 +516,13 @@ class BotScheduler:
 ✅ Мониторинг активен"""
                 
                 for admin_id, _ in admins:
-                    await self.notification_service.send_message_to_user(admin_id, startup_message)
+                    if self.main_loop and not self.main_loop.is_closed():
+                        asyncio.run_coroutine_threadsafe(
+                            self.notification_service.send_message_to_user(admin_id, startup_message),
+                            self.main_loop
+                        )
+                    else:
+                        await self.notification_service.send_message_to_user(admin_id, startup_message)
             except Exception as e:
                 logging.error(f"Ошибка отправки уведомления о запуске: {e}")
             
@@ -517,7 +558,13 @@ class BotScheduler:
 ❌ Мониторинг неактивен"""
                 
                 for admin_id, _ in admins:
-                    await self.notification_service.send_message_to_user(admin_id, shutdown_message)
+                    if self.main_loop and not self.main_loop.is_closed():
+                        asyncio.run_coroutine_threadsafe(
+                            self.notification_service.send_message_to_user(admin_id, shutdown_message),
+                            self.main_loop
+                        )
+                    else:
+                        await self.notification_service.send_message_to_user(admin_id, shutdown_message)
             except Exception as e:
                 logging.error(f"Ошибка отправки уведомления об остановке: {e}")
                 

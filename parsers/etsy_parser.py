@@ -33,70 +33,42 @@ class EtsyParser(BaseParser):
             return "unknown_shop"
     
     def parse_shop_page(self, shop_url: str) -> List[Product]:
-        """Парсит все страницы магазина с пагинацией через браузер"""
-        all_products = []
-        current_url = shop_url
-        page_num = 1
-        browser_restart_count = 0
-        max_browser_restarts = 3
+        """Парсит только первую страницу магазина с сортировкой по дате"""
+        # Добавляем параметр сортировки для получения новинок
+        if '?' in shop_url:
+            shop_url_with_sort = f"{shop_url}&sort_order=date_desc"
+        else:
+            shop_url_with_sort = f"{shop_url}?sort_order=date_desc"
         
-        # Инициализируем браузер
-        if not self._initialize_browser():
-            return []
+        logging.info(f"📄 Парсим первую страницу: {shop_url_with_sort}")
         
-        # Загружаем первую страницу
-        if not self._load_first_page_with_browser_retry(shop_url):
-            logging.info("❌ Не удалось загрузить первую страницу после всех попыток")
-            return []
+        # Инициализируем браузер если его нет
+        if not self.browser_service or not self.browser_service.driver:
+            if not self._initialize_browser():
+                return []
         
-        # Теперь парсим все страницы
-        while current_url:
-            logging.info(f"📄 Парсим страницу {page_num}: {current_url}")
-            
-            # Парсим текущую страницу с обработкой ошибок
-            products = self._parse_single_page_with_retry(current_url, page_num == 1)
-            
-            if products is None:  # Требуется перезапуск браузера
-                if browser_restart_count < max_browser_restarts:
-                    browser_restart_count += 1
-                    logging.info(f"🔄 Перезапуск браузера #{browser_restart_count}/{max_browser_restarts}")
-                    
-                    if self._restart_browser_and_continue(current_url):
-                        logging.info("✅ Браузер перезапущен, продолжаем с текущей страницы")
-                        continue  # Повторяем попытку с той же страницей
-                    else:
-                        logging.info("❌ Не удалось перезапустить браузер")
-                        break
-                else:
-                    logging.info(f"❌ Превышено максимальное количество перезапусков браузера ({max_browser_restarts})")
-                    break
-            elif products:
-                all_products.extend(products)
-                logging.info(f"✅ Найдено товаров на странице {page_num}: {len(products)}")
-                browser_restart_count = 0  # Сбрасываем счетчик при успешном парсинге
-                
-                # Получаем URL следующей страницы
-                next_url = self._get_next_page_url_from_browser()
-                if next_url:
-                    current_url = next_url
-                    page_num += 1
-                    # Минимальная пауза между страницами
-                    time.sleep(1)
-                else:
-                    logging.info("📋 Следующая страница не найдена, завершаем парсинг")
-                    break
+        # Загружаем страницу с сортировкой
+        success, need_browser_restart = self.browser_service.load_page_with_403_handling(shop_url_with_sort)
+        if not success:
+            if need_browser_restart:
+                logging.info("🔄 Перезапуск браузера из-за 403")
+                if not self.browser_service.restart_browser():
+                    return []
+                success, _ = self.browser_service.load_page_with_403_handling(shop_url_with_sort)
+                if not success:
+                    return []
             else:
-                logging.info(f"⚠️ Товары не найдены на странице {page_num}")
-                break
+                return []
         
-        logging.info(f"🎉 Всего найдено товаров: {len(all_products)} на {page_num} страницах")
+        # Парсим только первую страницу
+        products = self._parse_single_page_with_browser(shop_url_with_sort, True)
         
-        # Закрываем браузер
-        if self.browser_service:
-            self.browser_service.close_browser()
-            self.browser_service = None
+        if products:
+            logging.info(f"✅ Найдено товаров: {len(products)}")
+        else:
+            logging.info("⚠️ Товары не найдены")
         
-        return all_products
+        return products if products else []
     
     def _initialize_browser(self) -> bool:
         """Инициализирует браузер с повторными попытками"""
@@ -116,6 +88,12 @@ class EtsyParser(BaseParser):
                     logging.info("❌ Не удалось запустить браузер после 3 попыток")
                     return False
         return False
+    
+    def close_browser(self):
+        """Закрывает браузер"""
+        if self.browser_service:
+            self.browser_service.close_browser()
+            self.browser_service = None
     
     def _load_first_page_with_browser_retry(self, shop_url: str) -> bool:
         """Загружает первую страницу с обработкой 403 ошибок и перезапуском браузера при необходимости"""

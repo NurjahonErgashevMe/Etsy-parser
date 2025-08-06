@@ -24,6 +24,7 @@ class AdminStates(StatesGroup):
 class ScheduleStates(StatesGroup):
     waiting_for_day = State()
     waiting_for_time = State()
+    waiting_for_custom_time = State()
 
 router = Router()
 
@@ -492,6 +493,92 @@ async def statistics(message: Message, db: BotDatabase, scheduler=None):
         f"📅 Расписание: {day_names.get(schedule_day, schedule_day)} в {schedule_time}\n"
         f"⚙️ Статус парсера: {parser_status}"
     )
+
+@router.callback_query(F.data == "custom_time", StateFilter(ScheduleStates.waiting_for_time))
+async def custom_time_input(callback: CallbackQuery, state: FSMContext):
+    """Обработка ввода времени вручную"""
+    await callback.message.edit_text(
+        "✏️ Введите время в формате HH:MM\n\n"
+        "🕰️ Примеры: 3:43, 19:45, 08:30\n\n"
+        "⚠️ Время указывается по Московскому времени"
+    )
+    await state.set_state(ScheduleStates.waiting_for_custom_time)
+    await callback.answer()
+
+@router.message(StateFilter(ScheduleStates.waiting_for_custom_time))
+async def process_custom_time(message: Message, state: FSMContext, db: BotDatabase, scheduler=None):
+    """Обработка введенного времени"""
+    time_text = message.text.strip()
+    
+    # Проверяем формат времени
+    import re
+    time_pattern = r'^([0-9]|0[0-9]|1[0-9]|2[0-3]):([0-5][0-9])$'
+    
+    if not re.match(time_pattern, time_text):
+        await message.answer(
+            "❌ Неверный формат времени!\n\n"
+            "🕰️ Примеры правильного формата:\n"
+            "• 3:43\n"
+            "• 19:45\n"
+            "• 08:30\n\n"
+            "Попробуйте еще раз:"
+        )
+        return
+    
+    # Приводим к стандартному формату HH:MM
+    parts = time_text.split(':')
+    hour = int(parts[0])
+    minute = int(parts[1])
+    formatted_time = f"{hour:02d}:{minute:02d}"
+    
+    # Получаем выбранный день
+    data = await state.get_data()
+    selected_day = data.get("selected_day")
+    
+    # Сохраняем настройки
+    success = await db.update_scheduler_settings(formatted_time, selected_day, message.from_user.id)
+    
+    day_names = {
+        "monday": "Понедельник",
+        "tuesday": "Вторник",
+        "wednesday": "Среда",
+        "thursday": "Четверг",
+        "friday": "Пятница",
+        "saturday": "Суббота",
+        "sunday": "Воскресенье"
+    }
+    
+    if success:
+        await message.answer(
+            f"✅ Расписание успешно настроено!\n\n"
+            f"📅 День: {day_names.get(selected_day, selected_day)}\n"
+            f"🕰️ Время: {formatted_time}\n\n"
+            f"🔄 Планировщик перезапускается..."
+        )
+        
+        # Перезапускаем планировщик
+        if scheduler:
+            try:
+                await scheduler.restart_scheduler()
+                await message.answer(
+                    f"✅ Планировщик перезапущен!\n\n"
+                    f"🎆 Следующий запуск: {day_names.get(selected_day, selected_day)} в {formatted_time}",
+                    reply_markup=get_main_menu()
+                )
+            except Exception as e:
+                await message.answer(
+                    f"✅ Настройки сохранены, но возникла ошибка при перезапуске планировщика.\n\n"
+                    f"❌ Ошибка: {str(e)[:100]}\n\n"
+                    f"Перезапустите бота для применения изменений.",
+                    reply_markup=get_main_menu()
+                )
+    else:
+        await message.answer(
+            "❌ Ошибка при сохранении настроек. Попробуйте еще раз.",
+            reply_markup=get_main_menu()
+        )
+    
+    await state.clear()
 
 @router.message(F.text == "ℹ️ Помощь")
 async def help_command(message: Message, db: BotDatabase):

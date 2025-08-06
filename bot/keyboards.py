@@ -80,6 +80,11 @@ def get_time_keyboard() -> InlineKeyboardMarkup:
         ]
         keyboard_rows.append(row)
     
+    # Добавляем кнопку для ввода времени вручную
+    keyboard_rows.append([
+        InlineKeyboardButton(text="✏️ Ввести время вручную", callback_data="custom_time")
+    ])
+    
     keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
     return keyboard
 
