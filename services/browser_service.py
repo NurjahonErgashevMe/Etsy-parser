@@ -1,10 +1,18 @@
 """
-Сервис для работы с браузером через Selenium Stealth
+Сервис для работы с браузером через Selenium Stealth с поддержкой резидентских прокси
 """
 import time
 import json
+import os
+import tempfile
 from typing import Dict, Optional, List
-from selenium import webdriver
+try:
+    from seleniumwire import webdriver
+    SELENIUM_WIRE_AVAILABLE = True
+except ImportError:
+    from selenium import webdriver
+    SELENIUM_WIRE_AVAILABLE = False
+    
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -13,6 +21,7 @@ from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium_stealth import stealth
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.service import Service
+from utils.proxy_manager import ProxyManager
 
 class BrowserService:
     """Сервис для работы с браузером"""
@@ -23,6 +32,9 @@ class BrowserService:
         self.captured_headers = {}
         self.max_retries = 3
         self.wait_timeout = 90  # 1.5 минуты
+        self.proxy_manager = ProxyManager()
+        self.current_proxy = None
+        self.proxy_extension_path = None
     
     def _check_chrome_installation(self) -> bool:
         """Проверяет наличие установленного Chrome"""
@@ -59,11 +71,21 @@ class BrowserService:
         print("💡 Или убедитесь, что Chrome установлен в стандартной папке")
         return False
         
-    def setup_driver(self):
-        """Настройка Chrome драйвера с stealth режимом и имитацией человека"""
+    def setup_driver(self, use_proxy: bool = True):
+        """Настройка Chrome драйвера с stealth режимом, имитацией человека и прокси"""
         # Проверяем наличие Chrome
         if not self._check_chrome_installation():
             return False
+        
+        # Получаем случайный рабочий прокси если нужно
+        if use_proxy:
+            self.current_proxy = self.proxy_manager.get_random_proxy()
+            if not self.current_proxy:
+                print("❌ Не удалось получить прокси!")
+                return False
+            print(f"🌐 Используем случайный прокси: {self.current_proxy['host']}:{self.current_proxy['port']}")
+        else:
+            print("🌐 Запуск без прокси")
             
         chrome_options = Options()
         
@@ -77,35 +99,64 @@ class BrowserService:
         # Открываем браузер в полноэкранном режиме
         chrome_options.add_argument("--start-maximized")
         
-        # Убираем автоматическое открытие DevTools (вызывает проблемы с загрузкой)
-        # chrome_options.add_argument("--auto-open-devtools-for-tabs")
-        
-        # Настройки для имитации человека
+        # Настройки для скорости - загружаем только HTML и CSS
         prefs = {
-            "profile.managed_default_content_settings.images": 2,  # Отключаем изображения для скорости
-            "profile.default_content_setting_values.notifications": 2,
-            "profile.default_content_settings.popups": 0,
-            "profile.managed_default_content_settings.media_stream": 1
+            "profile.managed_default_content_settings.images": 2,  # Отключаем изображения
+            "profile.default_content_setting_values.notifications": 2,  # Отключаем уведомления
+            "profile.default_content_settings.popups": 0,  # Отключаем попапы
+            "profile.managed_default_content_settings.media_stream": 2,  # Отключаем медиа
+            "profile.managed_default_content_settings.stylesheets": 1,  # Оставляем CSS
+            "profile.managed_default_content_settings.javascript": 1,   # ВКЛЮЧАЕМ JS (сайт требует)
+            "profile.managed_default_content_settings.plugins": 2,  # Отключаем плагины
+            "profile.managed_default_content_settings.geolocation": 2,  # Отключаем геолокацию
+            "profile.managed_default_content_settings.media_stream_mic": 2,  # Отключаем микрофон
+            "profile.managed_default_content_settings.media_stream_camera": 2,  # Отключаем камеру
+            "profile.default_content_setting_values.automatic_downloads": 2,  # Отключаем автозагрузки
         }
         chrome_options.add_experimental_option("prefs", prefs)
+        
+        # Дополнительные опции для ускорения
+        chrome_options.add_argument("--disable-background-timer-throttling")
+        chrome_options.add_argument("--disable-backgrounding-occluded-windows")
+        chrome_options.add_argument("--disable-renderer-backgrounding")
+        chrome_options.add_argument("--disable-features=TranslateUI")
+        chrome_options.add_argument("--disable-ipc-flooding-protection")
+        chrome_options.add_argument("--aggressive-cache-discard")
+        chrome_options.add_argument("--memory-pressure-off")
         
         # Включаем логирование сетевых запросов
         chrome_options.add_argument("--enable-logging")
         chrome_options.add_argument("--log-level=0")
         chrome_options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
         
+        # Дополнительные опции для блокировки ненужных ресурсов
+        chrome_options.add_argument("--disable-extensions-except")
+        chrome_options.add_argument("--disable-plugins-discovery")
+        chrome_options.add_argument("--disable-default-apps")
+        chrome_options.add_argument("--disable-background-networking")
+        chrome_options.add_argument("--disable-sync")
+        chrome_options.add_argument("--disable-translate")
+        chrome_options.add_argument("--disable-web-resources")
+        chrome_options.add_argument("--disable-client-side-phishing-detection")
+        chrome_options.add_argument("--disable-component-extensions-with-background-pages")
+        chrome_options.add_argument("--disable-background-downloads")
+        chrome_options.add_argument("--disable-add-to-shelf")
+        chrome_options.add_argument("--disable-datasaver-prompt")
+        chrome_options.add_argument("--disable-domain-reliability")
+        chrome_options.add_argument("--disable-features=VizDisplayCompositor,TranslateUI")
+        chrome_options.add_argument("--blink-settings=imagesEnabled=false")  # Дополнительная блокировка изображений
+        
         # Дополнительные опции для стабильности
         chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--disable-extensions")
         chrome_options.add_argument("--disable-plugins")
-        # chrome_options.add_argument("--headless=new")
-        # Убираем конфликтующие опции
-        # chrome_options.add_argument("--disable-images")  # Уже отключены через prefs
-        # chrome_options.add_argument("--disable-javascript")  # JS нужен для работы сайта
         
-        # Убираем проблемные опции
-        # chrome_options.add_argument("--disable-web-security")
-        # chrome_options.add_argument("--allow-running-insecure-content")
+        # Настройка прокси
+        seleniumwire_options = None
+        if use_proxy and self.current_proxy:
+            if SELENIUM_WIRE_AVAILABLE:
+                seleniumwire_options = self._get_seleniumwire_proxy_options()
+            else:
+                self._setup_proxy_options(chrome_options)
         
         try:
             print("🔧 Устанавливаем ChromeDriver...")
@@ -116,7 +167,6 @@ class BrowserService:
                 print(f"✅ ChromeDriver путь: {driver_path}")
                 
                 # Проверяем, что путь указывает на правильный файл
-                import os
                 if not driver_path.endswith('chromedriver.exe'):
                     # Ищем chromedriver.exe в той же папке
                     driver_dir = os.path.dirname(driver_path)
@@ -135,7 +185,16 @@ class BrowserService:
                 service = Service()  # Попробуем системный драйвер
             
             print("🚀 Запускаем Chrome браузер...")
-            self.driver = webdriver.Chrome(service=service, options=chrome_options)
+            if seleniumwire_options:
+                self.driver = webdriver.Chrome(
+                    service=service, 
+                    options=chrome_options,
+                    seleniumwire_options=seleniumwire_options
+                )
+                # Настраиваем блокировку ненужных ресурсов
+                self._setup_request_blocking()
+            else:
+                self.driver = webdriver.Chrome(service=service, options=chrome_options)
             
             # Применяем stealth настройки
             stealth(self.driver,
@@ -152,11 +211,18 @@ class BrowserService:
             # Добавляем имитацию человеческого поведения
             self._setup_human_behavior()
             
+            # Проверяем IP если используем прокси
+            if use_proxy and self.current_proxy:
+                self._verify_proxy_ip()
+            
             print("✅ Браузер успешно запущен в stealth режиме с имитацией человека")
             return True
             
         except Exception as e:
             print(f"❌ Ошибка при запуске браузера: {e}")
+            
+            # Очищаем временные файлы прокси при ошибке
+            self._cleanup_proxy_extension()
             
             # Пытаемся диагностировать проблему
             if "WinError 193" in str(e):
@@ -168,6 +234,9 @@ class BrowserService:
             elif "chromedriver" in str(e).lower():
                 print("🔍 Диагностика: Проблема с ChromeDriver")
                 print("💡 Попробуйте переустановить ChromeDriver")
+            elif "proxy" in str(e).lower():
+                print("🔍 Диагностика: Проблема с прокси")
+                print("💡 Проверьте настройки прокси в proxies.txt")
             
             return False
     
@@ -196,6 +265,100 @@ class BrowserService:
             
         except Exception as e:
             print(f"⚠️ Ошибка при настройке имитации человека: {e}")
+    
+    def _get_seleniumwire_proxy_options(self):
+        """Возвращает настройки прокси для selenium-wire"""
+        proxy_url = self.proxy_manager.format_proxy_for_chrome(self.current_proxy)
+        
+        return {
+            'proxy': {
+                'http': proxy_url,
+                'https': proxy_url,
+            }
+        }
+    
+    def _setup_proxy_options(self, chrome_options: Options):
+        """Настраивает опции Chrome для работы с прокси"""
+        try:
+            # Создаем расширение для аутентификации прокси
+            self.proxy_extension_path = self.proxy_manager.get_proxy_auth_extension(self.current_proxy)
+            
+            # Добавляем расширение в Chrome (должно быть до других опций)
+            chrome_options.add_extension(self.proxy_extension_path)
+            
+            # Настройка прокси через аргументы командной строки
+            proxy_server = f"{self.current_proxy['host']}:{self.current_proxy['port']}"
+            chrome_options.add_argument(f"--proxy-server=http://{proxy_server}")
+            
+            # Отключаем различные проверки безопасности для прокси
+            chrome_options.add_argument("--ignore-certificate-errors")
+            chrome_options.add_argument("--ignore-ssl-errors")
+            chrome_options.add_argument("--ignore-certificate-errors-spki-list")
+            chrome_options.add_argument("--ignore-certificate-errors-ssl-errors")
+            chrome_options.add_argument("--allow-running-insecure-content")
+            chrome_options.add_argument("--disable-web-security")
+            chrome_options.add_argument("--allow-cross-origin-auth-prompt")
+            
+            # Отключаем диалоги аутентификации
+            chrome_options.add_argument("--disable-features=VizDisplayCompositor")
+            
+            print(f"🔧 Настроен прокси: {self.current_proxy['host']}:{self.current_proxy['port']}")
+            
+        except Exception as e:
+            print(f"❌ Ошибка при настройке прокси: {e}")
+            raise e
+    
+    def _verify_proxy_ip(self):
+        """Проверяет текущий IP адрес через прокси"""
+        try:
+            print("🔍 Проверяем IP адрес через прокси...")
+            
+            # Переходим на сайт для проверки IP
+            self.driver.get("https://ip.decodo.com/json")
+            time.sleep(3)
+            
+            # Получаем результат
+            page_source = self.driver.page_source
+            if "ip" in page_source.lower():
+                print(f"✅ IP проверен через прокси")
+                # Можно извлечь IP из JSON если нужно
+                import re
+                ip_match = re.search(r'"ip":\s*"([^"]+)"', page_source)
+                if ip_match:
+                    current_ip = ip_match.group(1)
+                    print(f"🌐 Текущий IP: {current_ip}")
+            else:
+                print("⚠️ Не удалось получить информацию об IP")
+                
+        except Exception as e:
+            print(f"⚠️ Ошибка при проверке IP: {e}")
+    
+    def _cleanup_proxy_extension(self):
+        """Очищает временные файлы расширения прокси"""
+        try:
+            if self.proxy_extension_path and os.path.exists(self.proxy_extension_path):
+                os.remove(self.proxy_extension_path)
+                print("🧹 Временное расширение прокси удалено")
+        except Exception as e:
+            print(f"⚠️ Ошибка при удалении расширения прокси: {e}")
+    
+    def change_proxy(self) -> bool:
+        """Меняет прокси на новый и перезапускает браузер"""
+        print("🔄 Смена прокси...")
+        
+        # Закрываем текущий браузер
+        self.close_browser()
+        
+        # Получаем новый прокси
+        self.current_proxy = self.proxy_manager.get_random_proxy()
+        if not self.current_proxy:
+            print("❌ Не удалось получить новый прокси!")
+            return False
+        
+        print(f"🌐 Новый прокси: {self.current_proxy['host']}:{self.current_proxy['port']}")
+        
+        # Запускаем браузер с новым прокси
+        return self.setup_driver(use_proxy=True)
     
     def simulate_human_actions(self):
         """Имитирует человеческие действия на странице"""
@@ -500,6 +663,90 @@ class BrowserService:
         except Exception as e:
             print(f"⚠️ Ошибка при ожидании загрузки: {e}")
     
+    def wait_for_products_and_stop_loading(self, max_wait_time: int = 30) -> bool:
+        """
+        Ждет появления товаров на странице и останавливает загрузку.
+        Возвращает True если товары найдены, False если таймаут.
+        """
+        print("🛍️ Ожидание появления товаров...")
+        start_time = time.time()
+        
+        while time.time() - start_time < max_wait_time:
+            try:
+                # Проверяем наличие контейнера с товарами
+                page_source = self.driver.page_source
+                if 'shop_home_listing_grid' in page_source:
+                    print("✅ Контейнер с товарами найден!")
+                    
+                    # Останавливаем загрузку страницы
+                    try:
+                        self.driver.execute_script("window.stop();")
+                        print("🛑 Загрузка страницы остановлена")
+                    except:
+                        pass
+                    
+                    return True
+                
+                # Небольшая пауза перед следующей проверкой
+                time.sleep(0.5)
+                
+            except Exception as e:
+                print(f"⚠️ Ошибка при проверке товаров: {e}")
+                time.sleep(1)
+        
+        print(f"⏰ Таймаут ожидания товаров ({max_wait_time}s)")
+        return False
+    
+    def _setup_request_blocking(self):
+        """Настраивает блокировку ненужных запросов через selenium-wire"""
+        if not SELENIUM_WIRE_AVAILABLE:
+            return
+        
+        def request_interceptor(request):
+            # Список доменов и путей для блокировки
+            blocked_domains = [
+                'bat.bing.com',
+                'podscribe.com', 
+                'googleapis.com',
+                'google.com/c2dm',
+                'pinterest.com',
+                'qualtrics.com',
+                'adsrvr.org',
+                'imrworldwide.com',
+                'tapad.com',
+                'adnxs.com',
+                'gvt2.com',
+                'facebook.com',
+                'doubleclick.net',
+                'googlesyndication.com',
+                'googletagmanager.com',
+                'google-analytics.com',
+                'hotjar.com',
+                'mixpanel.com',
+                'segment.com',
+                'amplitude.com'
+            ]
+            
+            blocked_extensions = ['.js', '.woff', '.woff2', '.ttf', '.eot']
+            
+            # Проверяем домен
+            for domain in blocked_domains:
+                if domain in request.url:
+                    print(f"🚫 Блокируем запрос к {domain}")
+                    request.abort()
+                    return
+            
+            # Блокируем JS файлы (кроме основных Etsy)
+            if any(request.url.endswith(ext) for ext in blocked_extensions):
+                if 'etsy.com' not in request.url or '/include/tags.js' in request.url:
+                    print(f"🚫 Блокируем ресурс: {request.url}")
+                    request.abort()
+                    return
+        
+        # Устанавливаем перехватчик
+        self.driver.request_interceptor = request_interceptor
+        print("🛡️ Настроена блокировка ненужных запросов")
+    
     def get_page_source(self) -> str:
         """Возвращает HTML код страницы"""
         if not self.driver:
@@ -564,6 +811,9 @@ class BrowserService:
                 print(f"Ошибка при закрытии браузера: {e}")
             finally:
                 self.driver = None
+        
+        # Очищаем временные файлы прокси
+        self._cleanup_proxy_extension()
     
     def _debug_pagination_before_close(self):
         """Выводит отладочную информацию о пагинации перед закрытием браузера"""
@@ -611,12 +861,97 @@ class BrowserService:
         except Exception as e:
             print(f"⚠️ DEBUG: Ошибка при отладке пагинации: {e}")
     
-    def restart_browser(self) -> bool:
-        """Перезапускает браузер (новый воркер)"""
+    def _setup_request_blocking(self):
+        """Настраивает блокировку ненужных ресурсов через selenium-wire"""
+        if not SELENIUM_WIRE_AVAILABLE:
+            return
+            
+        def request_interceptor(request):
+            # Блокируемые домены и паттерны
+            blocked_domains = [
+                'google-analytics.com',
+                'googletagmanager.com',
+                'facebook.com',
+                'facebook.net',
+                'doubleclick.net',
+                'googlesyndication.com',
+                'adsystem.com',
+                'amazon-adsystem.com',
+                'bat.bing.com',
+                'podscribe.com',
+                'googleapis.com',
+                'pinterest.com',
+                'adsrvr.org',
+                'imrworldwide.com',
+                'tapad.com',
+                'qualtrics.com',
+                'adnxs.com',
+                'gcp.gvt2.com',
+                'clients.google.com'
+            ]
+            
+            # Блокируемые типы файлов (НЕ блокируем JS - сайт требует)
+            blocked_extensions = [
+                '.woff',
+                '.woff2',
+                '.ttf',
+                '.eot',
+                '.svg',
+                '.png',
+                '.jpg',
+                '.jpeg',
+                '.gif',
+                '.webp',
+                '.ico',
+                '.mp4',
+                '.webm',
+                '.mp3'
+            ]
+            
+            # Проверяем домен
+            for domain in blocked_domains:
+                if domain in request.url:
+                    print(f"🚫 Блокируем запрос к {domain}")
+                    request.abort()
+                    return
+            
+            # Проверяем расширение файла
+            for ext in blocked_extensions:
+                if request.url.endswith(ext):
+                    print(f"🚫 Блокируем файл {ext}")
+                    request.abort()
+                    return
+            
+            # Блокируем только рекламные и трекинговые JS (разрешаем основные JS сайта)
+            if any(js_pattern in request.url.lower() for js_pattern in [
+                'analytics', 'tracking', 'gtag', 'fbevents', 'pixel',
+                'doubleclick', 'googlesyndication', 'amazon-adsystem'
+            ]) and 'etsy.com' not in request.url:
+                print(f"🚫 Блокируем рекламный JS: {request.url[:100]}...")
+                request.abort()
+                return
+                
+            print(f"✅ Разрешаем: {request.url[:100]}...")
+        
+        # Устанавливаем перехватчик запросов
+        self.driver.request_interceptor = request_interceptor
+        print("🛡️ Настроена блокировка ненужных ресурсов")
+    
+    def restart_browser(self, change_proxy: bool = True) -> bool:
+        """Перезапускает браузер (новый воркер) с возможностью смены прокси"""
         print("🔄 Перезапуск браузера...")
         self.close_browser()
         time.sleep(3)
-        return self.setup_driver()
+        
+        # Если нужно сменить прокси, получаем новый
+        if change_proxy:
+            self.current_proxy = self.proxy_manager.get_random_proxy()
+            if not self.current_proxy:
+                print("❌ Не удалось получить новый прокси!")
+                return False
+            print(f"🌐 Новый случайный прокси: {self.current_proxy['host']}:{self.current_proxy['port']}")
+        
+        return self.setup_driver(use_proxy=True)
     
     def __enter__(self):
         """Контекстный менеджер - вход"""

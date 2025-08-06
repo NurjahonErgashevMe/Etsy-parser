@@ -71,19 +71,20 @@ class EtsyParser(BaseParser):
         return products if products else []
     
     def _initialize_browser(self) -> bool:
-        """Инициализирует браузер с повторными попытками"""
+        """Инициализирует браузер с повторными попытками и прокси"""
         if not self.browser_service:
             self.browser_service = BrowserService(self.config)
             
         # Пытаемся запустить браузер с повторными попытками
         for attempt in range(3):
-            if self.browser_service.setup_driver():
+            if self.browser_service.setup_driver(use_proxy=True):
                 return True
             else:
                 logging.info(f"❌ Попытка {attempt + 1}/3 запуска браузера не удалась")
                 if attempt < 2:
                     time.sleep(2)
-                    self.browser_service.restart_browser()
+                    # При перезапуске меняем прокси
+                    self.browser_service.restart_browser(change_proxy=True)
                 else:
                     logging.info("❌ Не удалось запустить браузер после 3 попыток")
                     return False
@@ -96,11 +97,11 @@ class EtsyParser(BaseParser):
             self.browser_service = None
     
     def _load_first_page_with_browser_retry(self, shop_url: str) -> bool:
-        """Загружает первую страницу с обработкой 403 ошибок и перезапуском браузера при необходимости"""
+        """Загружает первую страницу с обработкой 403 ошибок и сменой прокси при необходимости"""
         max_browser_restarts = 3
         
         for browser_restart in range(max_browser_restarts):
-            logging.info(f"🚀 Попытка загрузки первой страницы (перезапуск браузера {browser_restart + 1}/{max_browser_restarts})")
+            logging.info(f"🚀 Попытка загрузки первой страницы (смена прокси {browser_restart + 1}/{max_browser_restarts})")
             
             # Используем новый метод с обработкой 403
             success, need_browser_restart = self.browser_service.load_page_with_403_handling(shop_url)
@@ -109,14 +110,15 @@ class EtsyParser(BaseParser):
                 logging.info("✅ Первая страница успешно загружена")
                 return True
             elif need_browser_restart:
-                logging.info(f"🔄 Требуется перезапуск браузера (попытка {browser_restart + 1}/{max_browser_restarts})")
+                logging.info(f"🔄 Требуется смена прокси (попытка {browser_restart + 1}/{max_browser_restarts})")
                 if browser_restart < max_browser_restarts - 1:
-                    if not self.browser_service.restart_browser():
-                        logging.info("❌ Не удалось перезапустить браузер")
+                    # Перезапускаем браузер с новым прокси
+                    if not self.browser_service.restart_browser(change_proxy=True):
+                        logging.info("❌ Не удалось перезапустить браузер с новым прокси")
                         return False
                     time.sleep(2)
                 else:
-                    logging.info("❌ Превышено максимальное количество перезапусков браузера")
+                    logging.info("❌ Превышено максимальное количество смен прокси")
                     return False
             else:
                 logging.info("❌ Не удалось загрузить первую страницу")
@@ -133,20 +135,23 @@ class EtsyParser(BaseParser):
             return None  # Сигнал для перезапуска браузера
     
     def _restart_browser_and_continue(self, current_url: str) -> bool:
-        """Перезапускает браузер и продолжает с указанной страницы"""
-        if not self.browser_service.restart_browser():
+        """Перезапускает браузер с новым прокси и продолжает с указанной страницы"""
+        logging.info("🔄 Перезапуск браузера с новым прокси...")
+        
+        if not self.browser_service.restart_browser(change_proxy=True):
             return False
         
         # Загружаем текущую страницу в новом браузере с обработкой 403
         success, need_browser_restart = self.browser_service.load_page_with_403_handling(current_url)
         
         if success:
+            logging.info("✅ Страница загружена с новым прокси")
             return True
         elif need_browser_restart:
-            logging.info("❌ Получен 403 даже после перезапуска браузера")
+            logging.info("❌ Получен 403 даже после смены прокси")
             return False
         else:
-            logging.info("❌ Не удалось загрузить страницу после перезапуска браузера")
+            logging.info("❌ Не удалось загрузить страницу после смены прокси")
             return False
     
     def _load_first_page_with_browser(self, shop_url: str) -> bool:

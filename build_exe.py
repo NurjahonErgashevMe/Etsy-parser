@@ -1,6 +1,5 @@
-
 """
-Скрипт для сборки исполняемого файла EtsyParser.exe с помощью PyInstaller
+Исправленный скрипт для сборки исполняемого файла EtsyParser.exe с помощью PyInstaller
 """
 
 import os
@@ -34,7 +33,7 @@ def get_selenium_stealth_path():
 
 def create_selenium_stealth_fallback():
     """Создает fallback JS файлы для selenium_stealth если их нет"""
-    print("🔧 Создаю резервные JS файлы для selenium_stealth...")
+    print("Создаю резервные JS файлы для selenium_stealth...")
     
     js_dir = Path('selenium_stealth_js')
     js_dir.mkdir(exist_ok=True)
@@ -152,7 +151,7 @@ window.chrome.loadTimes = function() {
 
 def clean_build_dirs():
     """Очистка директорий сборки"""
-    print("🧹 Очистка директорий сборки...")
+    print("Очистка директорий сборки...")
     
     # Удаляем директории build и dist, если они существуют
     for dir_name in ['build', 'dist']:
@@ -173,10 +172,10 @@ def clean_build_dirs():
 
 def check_main_file():
     """Проверка существования главного файла"""
-    print("🔍 Проверка главного файла...")
+    print("Проверка главного файла...")
     
     # Проверяем возможные имена главного файла
-    possible_files = ['gui_main.py', 'main.py']
+    possible_files = ['main.py']
     main_file = None
     
     for file in possible_files:
@@ -196,7 +195,7 @@ def check_main_file():
 
 def check_and_fix_pathlib():
     """Проверка и исправление проблемы с пакетом pathlib"""
-    print("🔍 Проверка пакета pathlib...")
+    print("Проверка пакета pathlib...")
     
     try:
         # Проверяем, установлен ли пакет pathlib
@@ -221,7 +220,7 @@ def check_and_fix_pathlib():
 
 def check_and_create_dirs():
     """Проверяет и создает необходимые директории"""
-    print("🔍 Проверка необходимых директорий...")
+    print("Проверка необходимых директорий...")
     
     # Создаем директории если их нет
     for dir_name in ['logs', 'output']:
@@ -246,167 +245,16 @@ def check_and_create_dirs():
     
     return True
 
-def create_spec_file(main_file):
-    """Создание .spec файла для PyInstaller"""
-    print("📝 Создание .spec файла...")
-    
-    # Получаем пути к selenium_stealth
-    stealth_path, js_path = get_selenium_stealth_path()
-    
-    # Определяем, нужна ли консоль (для отладки)
-    # console_mode = input("🖥️ Показывать консоль для отладки? (y/n): ").lower().strip() == 'y'
-    
-    # Собираем дополнительные файлы
-    data_files = []
-    additional_files = [
-        'config.txt',
-        'logs', 
-        'output'
-    ]
-    
-    print("🔍 Поиск дополнительных файлов...")
-    for file in additional_files:
-        if os.path.exists(file):
-            if os.path.isdir(file):
-                data_files.append(f"('{file}', '{file}')")
-                print(f"  ✅ {file}/ (папка)")
-            else:
-                data_files.append(f"('{file}', '.')")
-                print(f"  ✅ {file}")
-        else:
-            print(f"  ⚠️  {file} - не найден")
-    
-    # Добавляем selenium_stealth JS файлы если найдены
-    if js_path and os.path.exists(js_path):
-        # Нормализуем путь для Windows
-        js_path_normalized = js_path.replace('\\', '\\\\')
-        data_files.append(f"(r'{js_path_normalized}', 'selenium_stealth/js')")
-        print(f"  ✅ selenium_stealth JS файлы: {js_path}")
-    else:
-        # Создаем резервные JS файлы
-        fallback_js_path = create_selenium_stealth_fallback()
-        fallback_js_path_normalized = fallback_js_path.replace('\\', '\\\\')
-        data_files.append(f"(r'{fallback_js_path_normalized}', 'selenium_stealth/js')")
-        print(f"  ✅ Резервные selenium_stealth JS файлы: {fallback_js_path}")
-    
-    # Формируем строку с данными
-    if data_files:
-        datas_line = f"datas=[{', '.join(data_files)}],"
-        print(f"📦 Будут включены файлы: {len(data_files)} элементов")
-    else:
-        datas_line = "datas=[],"
-        print("📦 Дополнительные файлы не найдены")
-    
-    spec_content = f"""# -*- mode: python ; coding: utf-8 -*-
-
-import sys
-from pathlib import Path
-
-block_cipher = None
-
-# Определяем пути к файлам
-base_path = Path('.').absolute()
-
-# Собираем все необходимые данные
-a = Analysis(
-    ['{main_file}'],
-    pathex=[str(base_path)],
-    binaries=[],
-    {datas_line}
-    hiddenimports=[
-        'tkinter', 
-        'tkinter.ttk',
-        'tkinter.messagebox',
-        'tkinter.filedialog',
-        'tkinter.scrolledtext',
-        'selenium',
-        'selenium.webdriver',
-        'selenium.webdriver.chrome',
-        'selenium.webdriver.chrome.options',
-        'selenium.webdriver.chrome.service',
-        'selenium.webdriver.common.by',
-        'selenium.webdriver.support.ui',
-        'selenium.webdriver.support.expected_conditions',
-        'selenium_stealth',
-        'undetected_chromedriver',
-        'telegram',
-        'telegram.ext',
-        'asyncio',
-        'json',
-        'logging',
-        'threading',
-        'queue',
-        'time',
-        'datetime',
-        'os',
-        'sys',
-        're',
-        'requests',
-        'bs4',
-        'lxml',
-        'openpyxl',
-        'pandas',
-        'pathlib',
-        'dataclasses',
-        'typing',
-    ],
-    hookspath=[],
-    hooksconfig={{}},
-    runtime_hooks=[],
-    excludes=[],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
-    noarchive=False,
-)
-
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
-
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    [],
-    name='EtsyParser',
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=False,  # Отключаем консоль для GUI приложения
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    icon='logo.ico' if Path('logo.ico').exists() else None,
-)
-"""
-    
-    # Записываем .spec файл
-    spec_path = 'etsyparser.spec'
-    try:
-        with open(spec_path, 'w', encoding='utf-8') as f:
-            f.write(spec_content)
-        print(f"✅ Файл {spec_path} создан")
-        return spec_path
-    except Exception as e:
-        print(f"❌ Ошибка при создании .spec файла: {e}")
-        return None
-
 def simple_build_exe(main_file):
     """Простая сборка .exe файла"""
-    print("🔄 Запуск простой сборки...")
+    print("Запуск простой сборки...")
     
     # Получаем пути к selenium_stealth
     stealth_path, js_path = get_selenium_stealth_path()
     
     try:
         # Определяем, нужна ли консоль
-        console_mode = input("🖥️ Показывать консоль для отладки? (y/n): ").lower().strip() == 'y'
+        console_mode = input("Показывать консоль для отладки? (y/n): ").lower().strip() == 'y'
         
         # Используем простую команду PyInstaller
         cmd = [
@@ -419,7 +267,21 @@ def simple_build_exe(main_file):
             '--add-data', f'config.txt{os.pathsep}.',
             '--add-data', f'logs{os.pathsep}logs',
             '--add-data', f'output{os.pathsep}output',
+            '--add-data', f'gui{os.pathsep}gui',
+            '--add-data', f'core{os.pathsep}core',
+            '--add-data', f'config{os.pathsep}config',
+            '--add-data', f'utils{os.pathsep}utils',
+            '--add-data', f'parsers{os.pathsep}parsers',
+            '--add-data', f'services{os.pathsep}services',
+            '--add-data', f'models{os.pathsep}models',
+            '--add-data', f'bot{os.pathsep}bot',
         ]
+        
+        # Добавляем дополнительные файлы если существуют
+        if os.path.exists('.env'):
+            cmd.extend(['--add-data', f'.env{os.pathsep}.'])
+        if os.path.exists('credentials.json'):
+            cmd.extend(['--add-data', f'credentials.json{os.pathsep}.'])
         
         # Добавляем selenium_stealth JS файлы
         if js_path and os.path.exists(js_path):
@@ -435,7 +297,7 @@ def simple_build_exe(main_file):
         if console_mode:
             cmd.append('--console')
         else:
-            cmd.append('--windowed')  # Без консоли для GUI приложения
+            cmd.append('--windowed')
         
         # Добавляем скрытые импорты
         hidden_imports = [
@@ -444,9 +306,14 @@ def simple_build_exe(main_file):
             'selenium.webdriver.chrome.service', 'selenium.webdriver.common.by',
             'selenium.webdriver.support.ui', 'selenium.webdriver.support.expected_conditions',
             'selenium_stealth', 'undetected_chromedriver',
-            'telegram', 'telegram.ext', 'requests', 'bs4', 'lxml', 'openpyxl', 'pandas', 
+            'aiogram', 'aiogram.types', 'aiogram.dispatcher', 'aiogram.utils',
+            'requests', 'bs4', 'lxml', 'openpyxl', 'pandas', 
             'asyncio', 'json', 'logging', 'threading', 'queue', 'time', 'datetime',
-            'pathlib', 'dataclasses', 'typing'
+            'pathlib', 'dataclasses', 'typing', 'schedule', 'pytz',
+            'gui', 'gui.main_window', 'gui.tabs', 'gui.tabs.config_tab', 'gui.tabs.control_tab', 'gui.tabs.logs_tab',
+            'core', 'core.monitor', 'config', 'config.settings', 'utils', 'utils.config_loader',
+            'parsers', 'parsers.etsy_parser', 'parsers.base_parser', 'services', 'services.browser_service',
+            'services.data_service', 'services.google_sheets_service', 'models', 'models.product', 'bot'
         ]
         
         for imp in hidden_imports:
@@ -458,7 +325,7 @@ def simple_build_exe(main_file):
         cmd.append(main_file)
         
         print(f"Выполняем команду: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         
         if result.returncode == 0:
             print("✅ Простая сборка успешно завершена!")
@@ -473,13 +340,16 @@ def simple_build_exe(main_file):
                 print(result.stderr[-2000:])
             return False
             
+    except subprocess.TimeoutExpired:
+        print("❌ PyInstaller завис (таймаут 10 минут). Попробуйте запустить вручную.")
+        return False
     except Exception as e:
         print(f"❌ Ошибка при простой сборке: {e}")
         return False
 
 def build_exe():
     """Сборка исполняемого файла"""
-    print("🚀 Начинаем сборку EtsyParser.exe...")
+    print("Начинаем сборку EtsyParser.exe...")
     
     # Проверяем главный файл
     main_file = check_main_file()
@@ -496,38 +366,11 @@ def build_exe():
     if not check_and_fix_pathlib():
         return False
     
-    # Спрашиваем пользователя о методе сборки
-    use_spec = input("📝 Использовать .spec файл? (y/n): ").lower().strip() == 'y'
-    
-    if use_spec:
-        # Создаем .spec файл
-        spec_file = create_spec_file(main_file)
-        if not spec_file:
-            return False
-        
-        # Запускаем PyInstaller
-        print("⚙️ Запуск PyInstaller с .spec файлом...")
-        try:
-            result = subprocess.run(
-                [sys.executable, '-m', 'PyInstaller', '--clean', spec_file],
-                capture_output=True, text=True
-            )
-            
-            if result.returncode == 0:
-                print("✅ Сборка успешно завершена!")
-                return check_exe_file()
-            else:
-                print("❌ Ошибка при сборке:")
-                print_error_details(result)
-                # Пробуем простую сборку
-                print("🔄 Пробую простую сборку...")
-                return simple_build_exe(main_file)
-                
-        except FileNotFoundError:
-            return install_pyinstaller_and_retry(main_file)
+    # Простая сборка
+    if simple_build_exe(main_file):
+        return check_exe_file()
     else:
-        # Простая сборка
-        return simple_build_exe(main_file)
+        return False
 
 def check_exe_file():
     """Проверка созданного исполняемого файла"""
@@ -537,36 +380,25 @@ def check_exe_file():
         print(f"📊 Размер файла: {size_mb:.1f} MB")
         print(f"📁 Исполняемый файл находится в: {exe_path.absolute()}")
         
-        print("\n🎉 Сборка успешно завершена! 🎉")
-        print("📁 Проверьте папку dist/")
-        print("🖼️ Иконка установлена (если logo.ico найдена)")
-        print("📦 Все необходимые файлы включены в .exe")
+        print("\nСборка успешно завершена!")
+        print("Проверьте папку dist/")
+        print("Иконка установлена (если logo.ico найдена)")
+        print("Все необходимые файлы включены в .exe")
         
         # Предлагаем тестирование
-        test_exe = input("🧪 Протестировать созданный .exe файл? (y/n): ").lower().strip() == 'y'
+        test_exe = input("Протестировать созданный .exe файл? (y/n): ").lower().strip() == 'y'
         if test_exe:
-            print("🚀 Запуск тестирования...")
+            print("Запуск тестирования...")
             try:
                 subprocess.Popen([str(exe_path)])
-                print("✅ Файл запущен для тестирования")
+                print("Файл запущен для тестирования")
             except Exception as e:
-                print(f"❌ Ошибка при запуске: {e}")
+                print(f"Ошибка при запуске: {e}")
         
         return True
     else:
         print("❌ Исполняемый файл не найден после сборки")
         return False
-
-def print_error_details(result):
-    """Вывод подробностей ошибки"""
-    print("\n--- ПОДРОБНАЯ ИНФОРМАЦИЯ ОБ ОШИБКЕ ---")
-    if result.stdout:
-        print("📋 STDOUT:")
-        print(result.stdout[-2000:])
-    if result.stderr:
-        print("🚨 STDERR:")
-        print(result.stderr[-2000:])
-    print("--- КОНЕЦ ИНФОРМАЦИИ ОБ ОШИБКЕ ---\n")
 
 def install_pyinstaller_and_retry(main_file):
     """Установка PyInstaller и повторная попытка"""
@@ -591,22 +423,25 @@ def install_pyinstaller_and_retry(main_file):
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("🔧 Сборка EtsyParser.exe")
+    print("Сборка EtsyParser.exe")
     print("=" * 60)
     
     success = build_exe()
     
     if success:
         print("\n✅ Сборка успешно завершена!")
-        print("💡 Если окно не появляется, попробуйте:")
-        print("   1. Пересобрать с включенной консолью для отладки")
-        print("   2. Проверить логи приложения")
-        print("   3. Запустить от имени администратора")
+        print("💡 Если exe файл не запускается:")
+        print("   1. Пересоберите с включенной консолью для отладки")
+        print("   2. Проверьте логи в папке logs/")
+        print("   3. Запустите от имени администратора")
+        print("   4. Убедитесь, что все зависимости установлены")
+        print("   5. Проверьте антивирус (может блокировать exe)")
     else:
         print("\n❌ Сборка завершилась с ошибками")
         print("💡 Попробуйте:")
-        print("   1. Проверить наличие всех зависимостей")
-        print("   2. Установить недостающие пакеты")
+        print("   1. Проверить наличие всех зависимостей: pip install -r requirements.txt")
+        print("   2. Обновить PyInstaller: pip install --upgrade pyinstaller")
         print("   3. Запустить скрипт от имени администратора")
+        print("   4. Очистить кэш Python: python -m pip cache purge")
     
     print("=" * 60)
