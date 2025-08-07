@@ -55,7 +55,7 @@ class AppConfig:
     def google_sheets_spreadsheet_id(self) -> str:
         """Получает ID Google Sheets из config.txt"""
         config_data = read_config_file()
-        return config_data.get('google_sheets_spreadsheet_id', '1YT4JqyDd6s3n4MZVle2MxyrN9PDnHlmYxSsIhNUU6jY')
+        return config_data.get('google_sheets_spreadsheet_id', '1X6R-ocA3xgybcq-sXgzltW56JnyPNZ_N2hlZn6uX42g')
     
     # Настройки планировщика
     scheduler_enabled: bool = True

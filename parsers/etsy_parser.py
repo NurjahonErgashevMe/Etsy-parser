@@ -77,7 +77,7 @@ class EtsyParser(BaseParser):
             
         # Пытаемся запустить браузер с повторными попытками
         for attempt in range(3):
-            if self.browser_service.setup_driver(use_proxy=True):
+            if self.browser_service.setup_driver(use_proxy=False):
                 return True
             else:
                 logging.info(f"❌ Попытка {attempt + 1}/3 запуска браузера не удалась")

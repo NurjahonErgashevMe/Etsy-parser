@@ -8,11 +8,13 @@ import tempfile
 import logging
 from typing import Dict, Optional, List
 try:
-    from seleniumwire import webdriver
+    from seleniumwire import webdriver as seleniumwire_webdriver
     SELENIUM_WIRE_AVAILABLE = True
 except ImportError:
-    from selenium import webdriver
     SELENIUM_WIRE_AVAILABLE = False
+
+# Всегда импортируем обычный selenium
+from selenium import webdriver
     
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
@@ -72,7 +74,7 @@ class BrowserService:
         logging.error("💡 Или убедитесь, что Chrome установлен в стандартной папке")
         return False
         
-    def setup_driver(self, use_proxy: bool = True):
+    def setup_driver(self, use_proxy: bool = False):
         """Настройка Chrome драйвера с stealth режимом, имитацией человека и прокси"""
         # Проверяем наличие Chrome
         if not self._check_chrome_installation():
@@ -86,7 +88,8 @@ class BrowserService:
                 return False
             logging.info(f"🌐 Используем случайный прокси: {self.current_proxy['host']}:{self.current_proxy['port']}")
         else:
-            logging.info("🌐 Запуск без прокси")
+            logging.info("🌐 Запуск без прокси (прокси временно отключены для тестирования на VDS)")
+            self.current_proxy = None
             
         chrome_options = Options()
         
@@ -96,6 +99,31 @@ class BrowserService:
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
+        
+        # Специальные настройки для Windows VDS серверов
+        import platform
+        if platform.system() == "Windows":
+            logging.info("🖥️ Применяем настройки для Windows VDS сервера")
+            chrome_options.add_argument("--disable-gpu")
+            chrome_options.add_argument("--disable-software-rasterizer")
+            chrome_options.add_argument("--disable-background-timer-throttling")
+            chrome_options.add_argument("--disable-backgrounding-occluded-windows")
+            chrome_options.add_argument("--disable-renderer-backgrounding")
+            chrome_options.add_argument("--disable-features=VizDisplayCompositor")
+            chrome_options.add_argument("--force-device-scale-factor=1")
+            # Дополнительные настройки для стабильности на VDS
+            chrome_options.add_argument("--disable-extensions")
+            chrome_options.add_argument("--disable-plugins")
+            chrome_options.add_argument("--disable-images")
+            chrome_options.add_argument("--disable-javascript-harmony-shipping")
+            chrome_options.add_argument("--disable-background-networking")
+            chrome_options.add_argument("--disable-sync")
+            chrome_options.add_argument("--disable-translate")
+            chrome_options.add_argument("--disable-ipc-flooding-protection")
+            # Настройки для работы с ограниченными правами
+            chrome_options.add_argument("--no-first-run")
+            chrome_options.add_argument("--no-default-browser-check")
+            chrome_options.add_argument("--disable-default-apps")
         
         # Открываем браузер в полноэкранном режиме
         chrome_options.add_argument("--start-maximized")
@@ -159,11 +187,19 @@ class BrowserService:
         
         # Настройка прокси
         seleniumwire_options = None
+        use_seleniumwire = False
+        
         if use_proxy and self.current_proxy:
             if SELENIUM_WIRE_AVAILABLE:
                 seleniumwire_options = self._get_seleniumwire_proxy_options()
+                use_seleniumwire = True
             else:
                 self._setup_proxy_options(chrome_options)
+        
+        # Принудительно отключаем selenium-wire если прокси не используются
+        if not use_proxy:
+            use_seleniumwire = False
+            seleniumwire_options = None
         
         try:
             logging.info("🔧 Устанавливаем ChromeDriver...")
@@ -192,16 +228,52 @@ class BrowserService:
                 service = Service()  # Попробуем системный драйвер
             
             logging.info("🚀 Запускаем Chrome браузер...")
-            if seleniumwire_options:
-                self.driver = webdriver.Chrome(
-                    service=service, 
-                    options=chrome_options,
-                    seleniumwire_options=seleniumwire_options
-                )
-                # Настраиваем блокировку ненужных ресурсов
-                self._setup_request_blocking()
-            else:
-                self.driver = webdriver.Chrome(service=service, options=chrome_options)
+            
+            # Пробуем создать драйвер с дополнительной обработкой ошибок для Windows VDS
+            driver_created = False
+            attempts = 0
+            max_attempts = 3
+            
+            while not driver_created and attempts < max_attempts:
+                attempts += 1
+                try:
+                    if use_seleniumwire and seleniumwire_options and SELENIUM_WIRE_AVAILABLE:
+                        # Используем selenium-wire только если прокси включены и доступны
+                        from seleniumwire import webdriver as sw_webdriver
+                        self.driver = sw_webdriver.Chrome(
+                            service=service, 
+                            options=chrome_options,
+                            seleniumwire_options=seleniumwire_options
+                        )
+                        # Настраиваем блокировку ненужных ресурсов
+                        self._setup_request_blocking()
+                    else:
+                        # Используем обычный selenium без wire
+                        from selenium import webdriver as s_webdriver
+                        self.driver = s_webdriver.Chrome(service=service, options=chrome_options)
+                    
+                    driver_created = True
+                    logging.info(f"✅ Браузер создан успешно (попытка {attempts})")
+                    
+                except Exception as driver_error:
+                    logging.warning(f"⚠️ Попытка {attempts} создания браузера не удалась: {driver_error}")
+                    
+                    if attempts < max_attempts:
+                        # Добавляем дополнительные опции для следующей попытки
+                        if "Permission denied" in str(driver_error) or "Access is denied" in str(driver_error):
+                            logging.info("🔧 Добавляем дополнительные опции для работы с ограниченными правами")
+                            chrome_options.add_argument("--disable-dev-shm-usage")
+                            chrome_options.add_argument("--disable-extensions")
+                            chrome_options.add_argument("--disable-plugins")
+                            chrome_options.add_argument("--disable-gpu")
+                            chrome_options.add_argument("--remote-debugging-port=0")
+                        
+                        time.sleep(2)  # Небольшая пауза перед повторной попыткой
+                    else:
+                        raise driver_error
+            
+            if not driver_created:
+                raise Exception("Не удалось создать браузер после всех попыток")
             
             # Применяем stealth настройки
             stealth(self.driver,
@@ -296,22 +368,29 @@ class BrowserService:
         """Настраивает опции Chrome для работы с прокси"""
         try:
             # Пробуем создать расширение для аутентификации прокси
+            extension_created = False
             try:
                 self.proxy_extension_path = self.proxy_manager.get_proxy_auth_extension(self.current_proxy)
                 # Добавляем расширение в Chrome (должно быть до других опций)
                 chrome_options.add_extension(self.proxy_extension_path)
                 logging.info("✅ Расширение прокси создано и добавлено")
+                extension_created = True
             except Exception as ext_error:
                 logging.warning(f"⚠️ Не удалось создать расширение прокси: {ext_error}")
                 logging.info("🔄 Используем альтернативный метод настройки прокси")
-                
-                # Альтернативный способ - только через аргументы командной строки
-                # В этом случае может потребоваться ручная аутентификация
-                pass
+                extension_created = False
             
             # Настройка прокси через аргументы командной строки
             proxy_server = f"{self.current_proxy['host']}:{self.current_proxy['port']}"
             chrome_options.add_argument(f"--proxy-server=http://{proxy_server}")
+            
+            # Если расширение не создалось, добавляем дополнительные опции
+            if not extension_created:
+                logging.info("🔧 Добавляем дополнительные опции для работы без расширения")
+                # Пробуем использовать базовую аутентификацию через URL
+                if 'username' in self.current_proxy and 'password' in self.current_proxy:
+                    auth_proxy = f"http://{self.current_proxy['username']}:{self.current_proxy['password']}@{proxy_server}"
+                    chrome_options.add_argument(f"--proxy-server={auth_proxy}")
             
             # Отключаем различные проверки безопасности для прокси
             chrome_options.add_argument("--ignore-certificate-errors")
@@ -431,8 +510,8 @@ class BrowserService:
         
         logging.info(f"🌐 Новый прокси: {self.current_proxy['host']}:{self.current_proxy['port']}")
         
-        # Запускаем браузер с новым прокси
-        return self.setup_driver(use_proxy=True)
+        # Запускаем браузер без прокси (временно отключено)
+        return self.setup_driver(use_proxy=False)
     
     def simulate_human_actions(self):
         """Имитирует человеческие действия на странице"""
@@ -1032,7 +1111,7 @@ class BrowserService:
                 return False
             print(f"🌐 Новый случайный прокси: {self.current_proxy['host']}:{self.current_proxy['port']}")
         
-        return self.setup_driver(use_proxy=True)
+        return self.setup_driver(use_proxy=False)
     
     def __enter__(self):
         """Контекстный менеджер - вход"""

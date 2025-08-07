@@ -1,3 +1,3 @@
 BOT_TOKEN=8331782765:AAGNk9xTWyrBk2oZRUfuupbCqS4Qgim60B4
 ADMIN_ID=6089511983
-is_working=stop
+is_working=start

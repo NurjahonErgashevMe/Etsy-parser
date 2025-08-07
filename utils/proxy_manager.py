@@ -12,6 +12,8 @@ class ProxyManager:
         self.proxy_file_path = proxy_file_path
         self.proxies = []
         self.current_proxy_index = 0
+        # Очищаем старые временные файлы при запуске
+        self.cleanup_all_proxy_extensions()
         self.load_proxies()
     
     def load_proxies(self) -> None:
@@ -116,19 +118,49 @@ class ProxyManager:
         import tempfile
         import json
         import stat
+        import uuid
+        import shutil
         
-        # Создаем временную папку для расширения с правильными правами
-        try:
-            extension_dir = tempfile.mkdtemp(prefix="proxy_auth_")
-            # Устанавливаем полные права на папку
-            os.chmod(extension_dir, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
-        except Exception as e:
-            logging.error(f"❌ Ошибка создания папки расширения: {e}")
-            # Пробуем создать в текущей директории
-            import uuid
-            extension_dir = f"proxy_auth_{uuid.uuid4().hex[:8]}"
-            os.makedirs(extension_dir, exist_ok=True)
-            os.chmod(extension_dir, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
+        # Пробуем создать папку в разных местах
+        extension_dir = None
+        attempts = [
+            # 1. В текущей рабочей директории
+            lambda: os.path.join(os.getcwd(), f"proxy_auth_{uuid.uuid4().hex[:8]}"),
+            # 2. В папке temp проекта
+            lambda: os.path.join(os.getcwd(), "temp", f"proxy_auth_{uuid.uuid4().hex[:8]}"),
+            # 3. В системной temp (если доступна)
+            lambda: tempfile.mkdtemp(prefix="proxy_auth_")
+        ]
+        
+        for i, create_dir in enumerate(attempts):
+            try:
+                extension_dir = create_dir()
+                
+                # Создаем папку если её нет
+                if not os.path.exists(extension_dir):
+                    os.makedirs(extension_dir, exist_ok=True)
+                
+                # Проверяем права на запись
+                test_file = os.path.join(extension_dir, "test_write.tmp")
+                with open(test_file, "w") as f:
+                    f.write("test")
+                os.remove(test_file)
+                
+                logging.info(f"✅ Создана папка расширения (попытка {i+1}): {extension_dir}")
+                break
+                
+            except Exception as e:
+                logging.warning(f"⚠️ Попытка {i+1} создания папки не удалась: {e}")
+                if extension_dir and os.path.exists(extension_dir):
+                    try:
+                        shutil.rmtree(extension_dir, ignore_errors=True)
+                    except:
+                        pass
+                extension_dir = None
+                continue
+        
+        if not extension_dir:
+            raise Exception("Не удалось создать папку для расширения прокси")
         
         # Экранируем специальные символы в пароле для JavaScript
         escaped_password = proxy_data['password'].replace('\\', '\\\\').replace('"', '\\"').replace("'", "\\'")
@@ -278,17 +310,22 @@ chrome.webRequest.onCompleted.addListener(
 console.log("🎯 Расширение готово к работе!");
 """
         
-        # Записываем файлы с правильными правами
+        # Записываем файлы
         try:
             manifest_path = os.path.join(extension_dir, "manifest.json")
             with open(manifest_path, "w", encoding='utf-8') as f:
                 json.dump(manifest_content, f, indent=2, ensure_ascii=False)
-            os.chmod(manifest_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
             
             background_path = os.path.join(extension_dir, "background.js")
             with open(background_path, "w", encoding='utf-8') as f:
                 f.write(background_content)
-            os.chmod(background_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
+            
+            # Пробуем установить права только если это возможно (не критично для Windows)
+            try:
+                os.chmod(manifest_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
+                os.chmod(background_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
+            except:
+                pass  # Игнорируем ошибки chmod на Windows
             
             logging.info(f"✅ Создано расширение для прокси: {extension_dir}")
             logging.info(f"📁 Путь к расширению: {extension_dir}")
@@ -299,7 +336,6 @@ console.log("🎯 Расширение готово к работе!");
             logging.error(f"❌ Ошибка записи файлов расширения: {e}")
             # Очищаем папку при ошибке
             try:
-                import shutil
                 shutil.rmtree(extension_dir, ignore_errors=True)
             except:
                 pass
@@ -482,6 +518,47 @@ console.log("🎯 Расширение готово к работе!");
                 logging.info(f"🧹 Временное расширение прокси удалено: {extension_path}")
         except Exception as e:
             logging.warning(f"⚠️ Ошибка при удалении расширения прокси: {e}")
+    
+    def cleanup_all_proxy_extensions(self) -> None:
+        """Очищает все временные папки расширений прокси"""
+        try:
+            import os
+            import shutil
+            import tempfile
+            import glob
+            
+            # Очищаем в текущей директории
+            current_dir_patterns = [
+                "proxy_auth_*",
+                os.path.join("temp", "proxy_auth_*")
+            ]
+            
+            for pattern in current_dir_patterns:
+                for path in glob.glob(pattern):
+                    if os.path.isdir(path):
+                        try:
+                            shutil.rmtree(path, ignore_errors=True)
+                            logging.info(f"🧹 Удалена старая папка прокси: {path}")
+                        except:
+                            pass
+            
+            # Очищаем в системной temp папке
+            try:
+                temp_dir = tempfile.gettempdir()
+                for item in os.listdir(temp_dir):
+                    if item.startswith("proxy_auth_"):
+                        item_path = os.path.join(temp_dir, item)
+                        if os.path.isdir(item_path):
+                            try:
+                                shutil.rmtree(item_path, ignore_errors=True)
+                                logging.info(f"🧹 Удалена старая папка прокси из temp: {item_path}")
+                            except:
+                                pass
+            except:
+                pass  # Игнорируем ошибки доступа к системной temp
+                
+        except Exception as e:
+            logging.warning(f"⚠️ Ошибка при очистке старых расширений прокси: {e}")
     
     def get_proxy_stats(self) -> Dict[str, int]:
         """Возвращает статистику по прокси"""
