@@ -57,11 +57,8 @@ class AppConfig:
         config_data = read_config_file()
         return config_data.get('google_sheets_spreadsheet_id', '1X6R-ocA3xgybcq-sXgzltW56JnyPNZ_N2hlZn6uX42g')
     
-    # Настройки планировщика
     scheduler_enabled: bool = True
-    # Планировщик запускается каждый день в 4:00 МСК
     
-    # Настройки Telegram бота
     telegram_bot_enabled: bool = True
     telegram_notifications_enabled: bool = True
     

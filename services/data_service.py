@@ -371,11 +371,11 @@ class DataService:
         print(f"Результаты с новыми товарами сохранены в файл: {results_file}")
         
         # Сохраняем новые товары в Google Sheets
-        self.save_new_products_to_sheets(new_products)
+        self.save_new_products_to_sheets(new_products, results)
         
         return results_file
     
-    def save_new_products_to_sheets(self, new_products: Dict[str, str]):
+    def save_new_products_to_sheets(self, new_products: Dict[str, str], results: Dict = None):
         """Сохраняет новые товары в Google Sheets"""
         if not new_products:
             return
@@ -390,7 +390,8 @@ class DataService:
                     sheets_service.add_new_products_to_sheets(
                         self.config.google_sheets_spreadsheet_id,
                         new_products,
-                        "Etsy Products"
+                        "Etsy Products",
+                        results
                     )
                 else:
                     print("⚠️ Google Sheets не настроен, пропускаем сохранение новых товаров")

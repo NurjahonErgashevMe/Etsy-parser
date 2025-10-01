@@ -1,13 +1,10 @@
-"""
-Сервис для работы с Google Sheets
-"""
 import gspread
 from google.auth.exceptions import GoogleAuthError
 from datetime import datetime
 from typing import List, Dict, Optional
+from utils.shop_helpers import get_shop_name_for_product, extract_shop_names_from_results
 
 class GoogleSheetsService:
-    """Сервис для работы с Google Таблицами"""
     
     def __init__(self, config):
         self.config = config
@@ -16,7 +13,6 @@ class GoogleSheetsService:
         self.enabled = self._initialize_client()
     
     def _initialize_client(self) -> bool:
-        """Инициализирует клиент Google Sheets"""
         try:
             self.client = gspread.service_account(filename=self.credentials_file)
             print(f"✅ Google Sheets клиент успешно инициализирован")
@@ -32,7 +28,6 @@ class GoogleSheetsService:
             return False
     
     def load_shop_urls_from_sheets(self, spreadsheet_id: str, sheet_name: str = "Etsy Shops") -> List[str]:
-        """Загружает список URL магазинов из Google Таблицы"""
         if not self.enabled:
             print("⚠️ Google Sheets не настроен, используем локальный файл")
             return []
@@ -40,16 +35,12 @@ class GoogleSheetsService:
         try:
             print(f"📊 Загрузка URL магазинов из листа '{sheet_name}'...")
             
-            # Открываем таблицу
             spreadsheet = self.client.open_by_key(spreadsheet_id)
             worksheet = spreadsheet.worksheet(sheet_name)
+            values = worksheet.col_values(1)
             
-            # Получаем все значения из столбца A (начиная со 2 строки, пропуская заголовок)
-            values = worksheet.col_values(1)  # Столбец A
-            
-            # Фильтруем пустые строки и заголовки
             urls = []
-            for value in values[1:]:  # Пропускаем первую строку (заголовок)
+            for value in values[1:]:
                 if value and value.strip() and value.startswith('http'):
                     urls.append(value.strip())
             
@@ -63,8 +54,7 @@ class GoogleSheetsService:
             print(f"❌ Ошибка при загрузке URL из Google Sheets: {e}")
             return []
     
-    def add_new_products_to_sheets(self, spreadsheet_id: str, new_products: Dict[str, str], sheet_name: str = "Etsy Products"):
-        """Добавляет новые товары в Google Таблицу"""
+    def add_new_products_to_sheets(self, spreadsheet_id: str, new_products: Dict[str, str], sheet_name: str = "Etsy Products", results: Dict = None):
         if not self.enabled:
             print("⚠️ Google Sheets не настроен, пропускаем сохранение")
             return
@@ -76,46 +66,40 @@ class GoogleSheetsService:
         try:
             print(f"📊 Добавление {len(new_products)} новых товаров в лист '{sheet_name}'...")
             
-            # Открываем таблицу
             spreadsheet = self.client.open_by_key(spreadsheet_id)
             
             try:
                 worksheet = spreadsheet.worksheet(sheet_name)
             except gspread.WorksheetNotFound:
-                # Создаём лист если его нет
                 print(f"📊 Создание нового листа '{sheet_name}'...")
-                worksheet = spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=2)
-                # Добавляем заголовки
-                worksheet.update('A1:B1', [['Ссылки на товары', 'Время обнаружения']])
+                worksheet = spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=3)
+                worksheet.update('A1:C1', [['Ссылки на товары', 'Время обнаружения', 'Название магазина']])
             
-            # Получаем текущее время
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
             rows_to_add = []
             for listing_id, url in new_products.items():
-                rows_to_add.append([url, current_time])
+                shop_name = get_shop_name_for_product(listing_id, url, results)
+                rows_to_add.append([url, current_time, shop_name])
             
             existing_data = worksheet.get_all_values()[1:]  
-
             all_data = rows_to_add + existing_data
             
             if all_data:
-                # Очищаем данные начиная со второй строки
-                worksheet.batch_clear([f'A2:B{len(existing_data) + len(rows_to_add) + 1}'])
-                
-                # Записываем все данные (новые сверху)
-                range_name = f'A2:B{len(all_data) + 1}'
+                worksheet.batch_clear([f'A2:C{len(existing_data) + len(rows_to_add) + 1}'])
+                range_name = f'A2:C{len(all_data) + 1}'
                 worksheet.update(range_name, all_data)
                 
                 print(f"✅ Добавлено {len(rows_to_add)} новых товаров в Google Sheets (сверху)")
                 print(f"📊 Общее количество записей: {len(all_data)}")
-                print(f"📊 Диапазон: {range_name}")
+                
+                added_shops = set(row[2] for row in rows_to_add)
+                print(f"📊 Добавлены товары из магазинов: {', '.join(added_shops)}")
             
         except Exception as e:
             print(f"❌ Ошибка при добавлении товаров в Google Sheets: {e}")
     
     def test_connection(self, spreadsheet_id: str) -> bool:
-        """Тестирует подключение к Google Sheets"""
         if not self.enabled:
             return False
         
@@ -123,7 +107,6 @@ class GoogleSheetsService:
             spreadsheet = self.client.open_by_key(spreadsheet_id)
             print(f"✅ Подключение к таблице '{spreadsheet.title}' успешно")
             
-            # Показываем доступные листы
             worksheets = spreadsheet.worksheets()
             print(f"📊 Доступные листы: {[ws.title for ws in worksheets]}")
             
