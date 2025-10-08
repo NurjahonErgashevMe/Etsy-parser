@@ -17,56 +17,53 @@ from models.product import Product
 import os
 
 class ParserLock:
-    """Класс для управления блокировкой парсера через config.txt"""
+    """Класс для управления блокировкой парсера через config-main.txt"""
     
     def __init__(self):
-        self.config_file = "config.txt"
+        self.config_file = "config-main.txt"
     
     def is_running(self) -> bool:
-        """Проверяет, запущен ли парсер согласно config.txt"""
+        """Проверяет, запущен ли парсер согласно config-main.txt"""
         from config.settings import is_parser_working
         return is_parser_working()
     
     def set_working(self):
-        """Устанавливает статус 'start' в config.txt"""
+        """Устанавливает статус 'start' в config-main.txt"""
         self._update_config_value("is_working", "start")
     
     def set_stopped(self):
-        """Устанавливает статус 'stop' в config.txt"""
+        """Устанавливает статус 'stop' в config-main.txt"""
         self._update_config_value("is_working", "stop")
     
     def get_status(self) -> str:
-        """Получает текущий статус из config.txt"""
+        """Получает текущий статус из config-main.txt"""
         from config.settings import read_config_file
         config_data = read_config_file()
         return config_data.get('is_working', 'stop')
     
     def _update_config_value(self, key: str, value: str):
-        """Обновляет значение в config.txt"""
+        """Обновляет значение в config-main.txt (сохраняет все остальные параметры)"""
         try:
-            # Читаем текущий конфиг
-            lines = []
+            # Читаем все существующие параметры
+            existing_data = {}
             if os.path.exists(self.config_file):
                 with open(self.config_file, 'r', encoding='utf-8') as f:
-                    lines = f.readlines()
+                    for line in f:
+                        line = line.strip()
+                        if line and '=' in line and not line.startswith('#'):
+                            k, v = line.split('=', 1)
+                            existing_data[k.strip()] = v.strip()
             
-            # Обновляем или добавляем значение
-            updated = False
-            for i, line in enumerate(lines):
-                if line.strip().startswith(f"{key}="):
-                    lines[i] = f"{key}={value}\n"
-                    updated = True
-                    break
+            # Обновляем нужный ключ
+            existing_data[key] = value
             
-            if not updated:
-                lines.append(f"{key}={value}\n")
-            
-            # Записываем обратно
+            # Записываем все обратно
             with open(self.config_file, 'w', encoding='utf-8') as f:
-                f.writelines(lines)
+                for k, v in existing_data.items():
+                    f.write(f"{k}={v}\n")
                 
         except Exception as e:
-            logging.error(f"Ошибка обновления config.txt: {e}")
+            logging.error(f"Ошибка обновления config-main.txt: {e}")
     
     def force_stop(self):
         """Принудительно останавливает парсер"""
@@ -146,6 +143,15 @@ class LoggingEtsyMonitor:
             
             # Находим новые товары
             new_products_dict = self.monitor.data_service.compare_all_shops_results(current_results)
+            
+            # Анализируем новые товары через EverBee
+            if new_products_dict:
+                logging.info(f"\n=== АНАЛИЗ НОВЫХ ТОВАРОВ ЧЕРЕЗ EVERBEE ===")
+                logging.info(f"📦 Товаров для анализа: {len(new_products_dict)}")
+                self.monitor.tops_service.process_new_products(
+                    new_products_dict, 
+                    self.monitor.data_service.current_parsing_folder
+                )
             
             # Сохраняем финальные результаты
             final_results_file = self.monitor.data_service.save_results_with_new_products(all_shop_products, new_products_dict)

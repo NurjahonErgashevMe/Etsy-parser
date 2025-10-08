@@ -18,7 +18,7 @@ class BotConfig:
     """Конфигурация бота"""
     
     def __init__(self):
-        # BOT_TOKEN и ADMIN_ID берем из config.txt через config_loader
+        # BOT_TOKEN и ADMIN_ID берем из config-main.txt через config_loader
         self.BOT_TOKEN = config_loader.get("BOT_TOKEN")
         
         admin_id_str = config_loader.get("ADMIN_ID", "0")

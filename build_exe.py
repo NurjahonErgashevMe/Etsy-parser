@@ -231,17 +231,17 @@ def check_and_create_dirs():
             except Exception as e:
                 print(f"❌ Ошибка при создании директории {dir_name}: {e}")
     
-    # Проверяем config.txt
-    if not os.path.exists('config.txt'):
+    # Проверяем config-main.txt
+    if not os.path.exists('config-main.txt'):
         try:
-            with open('config.txt', 'w', encoding='utf-8') as f:
+            with open('config-main.txt', 'w', encoding='utf-8') as f:
                 f.write("TELEGRAM_BOT_TOKEN=your_bot_token_here\n")
                 f.write("TELEGRAM_CHAT_ID=your_chat_id_here\n")
-            print("✅ Создан файл config.txt")
+            print("✅ Создан файл config-main.txt")
         except Exception as e:
-            print(f"❌ Ошибка при создании файла config.txt: {e}")
+            print(f"❌ Ошибка при создании файла config-main.txt: {e}")
     else:
-        print("✅ Файл config.txt найден")
+        print("✅ Файл config-main.txt найден")
     
     return True
 
@@ -264,7 +264,7 @@ def simple_build_exe(main_file):
             '--name=EtsyParser',
             '--onefile',
             '--clean',
-            '--add-data', f'config.txt{os.pathsep}.',
+            '--add-data', f'config-main.txt{os.pathsep}.',
             '--add-data', f'logs{os.pathsep}logs',
             '--add-data', f'output{os.pathsep}output',
             '--add-data', f'gui{os.pathsep}gui',

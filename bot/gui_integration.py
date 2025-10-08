@@ -42,7 +42,7 @@ class TelegramBotGUI:
         try:
             logger.info("Запуск Telegram бота из GUI...")
             
-            # Сохраняем конфигурацию в config.txt
+            # Сохраняем конфигурацию в config-main.txt
             config_data = {
                 "BOT_TOKEN": self.bot_token,
                 "ADMIN_ID": self.admin_ids[0] if self.admin_ids else ""

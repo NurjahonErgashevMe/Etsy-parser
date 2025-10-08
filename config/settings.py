@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from typing import Dict, Any
 
 def read_config_file() -> Dict[str, str]:
-    """Читает конфигурацию из config.txt"""
+    """Читает конфигурацию из config-main.txt"""
     config_data = {}
-    config_file = "config.txt"
+    config_file = "config-main.txt"
     
     if os.path.exists(config_file):
         try:
@@ -19,12 +19,12 @@ def read_config_file() -> Dict[str, str]:
                         key, value = line.split('=', 1)
                         config_data[key.strip()] = value.strip()
         except Exception as e:
-            print(f"Ошибка чтения config.txt: {e}")
+            print(f"Ошибка чтения config-main.txt: {e}")
     
     return config_data
 
 def is_parser_working() -> bool:
-    """Проверяет, запущен ли парсер согласно config.txt"""
+    """Проверяет, запущен ли парсер согласно config-main.txt"""
     config_data = read_config_file()
     return config_data.get('is_working', 'stop').lower() == 'start'
 
@@ -53,7 +53,7 @@ class AppConfig:
     
     @property
     def google_sheets_spreadsheet_id(self) -> str:
-        """Получает ID Google Sheets из config.txt"""
+        """Получает ID Google Sheets из config-main.txt"""
         config_data = read_config_file()
         return config_data.get('google_sheets_spreadsheet_id', '1X6R-ocA3xgybcq-sXgzltW56JnyPNZ_N2hlZn6uX42g')
     

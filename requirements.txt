@@ -7,10 +7,13 @@ python-dotenv==1.0.0
 schedule==1.2.0
 pytz==2023.3
 
+openpyxl
+
 # Web scraping dependencies (existing)
 selenium==4.15.2
 selenium-stealth==1.0.6
 selenium-wire==5.1.0
+blinker==1.6.3
 beautifulsoup4==4.12.2
 requests==2.31.0
 lxml==4.9.3

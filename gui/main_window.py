@@ -149,7 +149,7 @@ class MainWindow:
         try:
             logger.info("Закрытие Etsy Parser...")
 
-            # Устанавливаем статус остановки в config.txt
+            # Устанавливаем статус остановки в config-main.txt
             try:
                 from utils.config_loader import config_loader
                 config_loader.set_working_status("stop")

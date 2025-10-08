@@ -1,6 +1,3 @@
-config.txt
-
-
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -163,7 +160,12 @@ cython_debug/
 #.idea/
 
 # Project specific
-output/
+# Игнорируем содержимое output, но сохраняем структуру папок
+output/parsing/*
+output/tops/*
+!output/parsing/.gitkeep
+!output/tops/.gitkeep
+
 logs/
 *.xlsx
 *.xls
@@ -188,3 +190,5 @@ credentials.json
 # Test files
 test_*.py
 *_test.py
+
+config-main.txt

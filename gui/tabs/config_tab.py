@@ -204,9 +204,9 @@ class ConfigTab:
         """Получение пути к файлу конфигурации"""
         # Используем тот же метод, что и в config_loader
         if getattr(sys, 'frozen', False):
-            return Path(sys.executable).parent / "config.txt"
+            return Path(sys.executable).parent / "config-main.txt"
         else:
-            return Path(__file__).parent.parent.parent / "config.txt"
+            return Path(__file__).parent.parent.parent / "config-main.txt"
     
     def _save_config(self):
         """Сохранение конфигурации"""

@@ -7,6 +7,7 @@ from typing import List, Dict
 from config.settings import config
 from parsers.etsy_parser import EtsyParser
 from services.data_service import DataService
+from services.tops_service import TopsService
 from models.product import Product
 
 class EtsyMonitor:
@@ -16,6 +17,7 @@ class EtsyMonitor:
         self.config = config
         self.parser = EtsyParser(config)
         self.data_service = DataService(config)
+        self.tops_service = TopsService(self.data_service.tops_dir)
     
     def parse_single_shop(self, shop_url: str, compare_with_previous: bool = True) -> str:
         """Парсит один магазин и сохраняет результат"""
@@ -130,8 +132,20 @@ class EtsyMonitor:
         # Находим новые товары
         new_products_dict = self.data_service.compare_all_shops_results(current_results)
         
+        logging.debug(f"\n🔍 DEBUG: new_products_dict type = {type(new_products_dict)}")
+        logging.debug(f"🔍 DEBUG: new_products_dict length = {len(new_products_dict) if new_products_dict else 0}")
+        logging.debug(f"🔍 DEBUG: new_products_dict bool = {bool(new_products_dict)}")
+        
         # Сохраняем финальные результаты с новыми товарами
         final_results_file = self.data_service.save_results_with_new_products(all_shop_products, new_products_dict)
+        
+        # Анализируем новые товары через EverBee
+        logging.debug(f"\n🔍 DEBUG: Проверка условия для EverBee...")
+        if new_products_dict:
+            logging.info(f"✅ Условие выполнено! Запускаем EverBee анализ...")
+            self.tops_service.process_new_products(new_products_dict, self.data_service.current_parsing_folder)
+        else:
+            logging.error(f"❌ Условие НЕ выполнено! new_products_dict пустой или None")
         
         # Формируем результаты для бота
         comparison_results = []
