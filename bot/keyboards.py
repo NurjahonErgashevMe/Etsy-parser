@@ -8,10 +8,9 @@ def get_main_menu() -> ReplyKeyboardMarkup:
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🚀 Начать парсинг")],
-            [KeyboardButton(text="⚙️ Настройки")],
-            [KeyboardButton(text="👥 Управление админами")],
-            [KeyboardButton(text="📊 Статистика")],
-            [KeyboardButton(text="ℹ️ Помощь")]
+            [KeyboardButton(text="📈 Аналитика")],
+            [KeyboardButton(text="👥 Управление админами"),KeyboardButton(text="📊 Статистика")],
+            [KeyboardButton(text="ℹ️ Помощь"), KeyboardButton(text="⚙️ Настройки")]
         ],
         resize_keyboard=True,
         persistent=True
@@ -135,5 +134,17 @@ def get_stop_parsing_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="🛑 Завершить парсинг", callback_data="stop_parsing")]
         ]
+    )
+    return keyboard
+
+def get_analytics_menu() -> ReplyKeyboardMarkup:
+    """Меню аналитики"""
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🚀 Запустить аналитику")],
+            [KeyboardButton(text="⚙️ Настройки аналитики")],
+            [KeyboardButton(text="🔙 Назад")]
+        ],
+        resize_keyboard=True
     )
     return keyboard

@@ -13,8 +13,10 @@ from bot.database import BotDatabase
 from bot.keyboards import (
     get_main_menu, get_settings_menu, get_admin_menu,
     get_days_keyboard, get_time_keyboard, get_back_keyboard,
-    get_description_keyboard, get_admin_list_keyboard, get_confirm_delete_keyboard
+    get_description_keyboard, get_admin_list_keyboard, get_confirm_delete_keyboard,
+    get_analytics_menu
 )
+from services.analytics_service import AnalyticsService
 
 # Состояния для FSM
 class AdminStates(StatesGroup):
@@ -608,6 +610,131 @@ async def help_command(message: Message, db: BotDatabase):
     """
     
     await message.answer(help_text)
+
+@router.message(F.text == "📈 Аналитика")
+async def analytics_menu(message: Message, db: BotDatabase):
+    """Меню аналитики"""
+    if not await db.is_admin(message.from_user.id):
+        return
+    
+    await message.answer(
+        "📈 Аналитика листингов\n\n"
+        "Отслеживайте изменения в статистике ваших перспективных листингов.",
+        reply_markup=get_analytics_menu()
+    )
+
+@router.message(F.text == "🚀 Запустить аналитику")
+async def run_analytics(message: Message, db: BotDatabase):
+    """Запуск процесса аналитики"""
+    if not await db.is_admin(message.from_user.id):
+        return
+    
+    await message.answer(
+        "🚀 Запуск процесса аналитики...\n\n"
+        "⏳ Получение данных от EverBee..."
+    )
+    
+    import asyncio
+    
+    async def run_analytics_async():
+        """Запуск аналитики асинхронно"""
+        try:
+            analytics_service = AnalyticsService()
+            
+            listing_ids = analytics_service.get_all_listing_ids()
+            
+            if not listing_ids:
+                await message.answer(
+                    "⚠️ Нет листингов для аналитики.\n\n"
+                    "Сначала запустите парсинг для поиска новых товаров.",
+                    reply_markup=get_analytics_menu()
+                )
+                return
+            
+            await message.answer(
+                f"📊 Найдено {len(listing_ids)} листингов\n"
+                f"🔄 Получение актуальной статистики..."
+            )
+            
+            timestamp, current_stats = analytics_service.run_analytics()
+            
+            if not current_stats:
+                await message.answer(
+                    "❌ Не удалось получить данные от EverBee.\n\n"
+                    "Проверьте токен и попробуйте снова.",
+                    reply_markup=get_analytics_menu()
+                )
+                return
+            
+            await message.answer(
+                f"✅ Данные получены и сохранены!\n\n"
+                f"📅 Временная метка: {timestamp}\n"
+                f"📦 Обновлено листингов: {len(current_stats)}\n\n"
+                f"🔄 Формирование отчета об изменениях..."
+            )
+            
+            report = analytics_service.generate_changes_report()
+            
+            if not report:
+                await message.answer(
+                    "ℹ️ Это первый снимок статистики или нет изменений.\n\n"
+                    "Запустите аналитику позже, чтобы увидеть изменения.",
+                    reply_markup=get_analytics_menu()
+                )
+                return
+            
+            formatted_message = analytics_service.format_changes_message(report)
+            
+            max_length = 4000
+            if len(formatted_message) > max_length:
+                parts = []
+                current_part = ""
+                
+                for line in formatted_message.split('\n'):
+                    if len(current_part) + len(line) + 1 > max_length:
+                        parts.append(current_part)
+                        current_part = line + '\n'
+                    else:
+                        current_part += line + '\n'
+                
+                if current_part:
+                    parts.append(current_part)
+                
+                for i, part in enumerate(parts):
+                    if i == 0:
+                        await message.answer(part, parse_mode="HTML")
+                    else:
+                        await message.answer(f"📊 <b>Продолжение отчета ({i+1}/{len(parts)})</b>\n\n{part}", parse_mode="HTML")
+                    await asyncio.sleep(0.5)
+            else:
+                await message.answer(formatted_message, parse_mode="HTML")
+            
+            await message.answer(
+                "✅ Процесс аналитики завершен!",
+                reply_markup=get_analytics_menu()
+            )
+            
+        except Exception as e:
+            logging.error(f"Ошибка при аналитике: {e}", exc_info=True)
+            await message.answer(
+                f"❌ Ошибка при выполнении аналитики:\n\n"
+                f"🚨 {str(e)[:200]}",
+                reply_markup=get_analytics_menu()
+            )
+    
+    asyncio.create_task(run_analytics_async())
+
+@router.message(F.text == "⚙️ Настройки аналитики")
+async def analytics_settings(message: Message, db: BotDatabase):
+    """Настройки аналитики (заглушка)"""
+    if not await db.is_admin(message.from_user.id):
+        return
+    
+    await message.answer(
+        "⚙️ Настройки аналитики\n\n"
+        "🚧 Раздел в разработке...",
+        reply_markup=get_analytics_menu()
+    )
 
 @router.message(F.text == "🔙 Назад")
 async def back_to_main(message: Message, db: BotDatabase):
