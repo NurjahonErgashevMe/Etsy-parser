@@ -20,6 +20,7 @@ class EverBeeClient:
     SHOW_USER_URL = "https://api.everbee.com/users/show"
     LISTING_DETAILS_URL = "https://api.everbee.com/listings/{listing_id}"
     LISTINGS_BATCH_URL = "https://api.everbee.com/etsy_apis/listing"
+    SHOP_ANALYZE_URL = "https://api.everbee.com/shops/analyze_shop"
     
     def __init__(self, config_path: str = "config-main.txt"):
         self.config_path = config_path
@@ -166,9 +167,10 @@ class EverBeeClient:
     
     def get_listings_batch(self, listing_ids: List[str]) -> Optional[Dict]:
         """Получает данные нескольких листингов одним запросом"""
-        if not self.ensure_token():
-            logging.error("Не удалось получить валидный токен")
-            return None
+        if not self.token:
+            if not self.ensure_token():
+                logging.error("Не удалось получить валидный токен")
+                return None
         
         headers = {'x-access-token': self.token}
         
@@ -176,7 +178,7 @@ class EverBeeClient:
             response = requests.post(
                 self.LISTINGS_BATCH_URL, 
                 headers=headers, 
-                json={"listing_ids": [listing_ids]},
+                json={"listing_ids": listing_ids},
                 timeout=30
             )
             
@@ -204,6 +206,43 @@ class EverBeeClient:
             "num_favorers": listing.get("num_favorers"),
             "url": listing.get("url")
         }
+    
+    def get_shop_listings(self, shop_name: str, order_by: str = "listing_age_in_months", 
+                           time_range: str = "last_1_month", order_direction: str = "asc", 
+                           page: int = 1, per_page: int = 20) -> Optional[Dict]:
+        """Получает листинги магазина с сортировкой"""
+        if not self.token:
+            if not self.ensure_token():
+                logging.error("Не удалось получить валидный токен")
+                return None
+        
+        headers = {'x-access-token': self.token}
+        params = {
+            'shop_name': shop_name,
+            'order_by': order_by,
+            'time_range': time_range,
+            'order_direction': order_direction,
+            'page': page,
+            'per_page': per_page
+        }
+        
+        try:
+            response = requests.get(
+                self.SHOP_ANALYZE_URL, 
+                headers=headers, 
+                params=params,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logging.error(f"Ошибка получения листингов магазина {shop_name}: {response.status_code}")
+                return None
+                
+        except Exception as e:
+            logging.error(f"Ошибка запроса к EverBee для магазина {shop_name}: {e}")
+            return None
     
     def refresh_token(self) -> bool:
         """Принудительно обновляет токен"""

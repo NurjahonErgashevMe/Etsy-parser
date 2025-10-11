@@ -255,14 +255,20 @@ class DataService:
         previous_results_file = self.get_previous_results_file()
         
         if not previous_results_file:
-            print("Нет предыдущих результатов для сравнения")
-            return {}
+            print("Нет предыдущих результатов для сравнения - все товары считаются новыми")
+            new_products = {}
+            for shop_name, shop_products in current_results.items():
+                new_products.update(shop_products)
+            return new_products
         
         previous_results = self.load_results_from_json(previous_results_file)
         
         if not previous_results:
-            print("Не удалось загрузить предыдущие результаты")
-            return {}
+            print("Не удалось загрузить предыдущие результаты - все товары считаются новыми")
+            new_products = {}
+            for shop_name, shop_products in current_results.items():
+                new_products.update(shop_products)
+            return new_products
         
         new_products = {}
         
@@ -300,7 +306,7 @@ class DataService:
         
         return new_products
     
-    def save_results_with_new_products(self, all_shop_products: Dict[str, List[Product]], new_products: Dict[str, str]) -> str:
+    def save_results_with_new_products(self, all_shop_products: Dict[str, List[Product]], new_products: Dict[str, str], new_products_full_data: Dict[str, Product] = None) -> str:
         """Сохраняет результаты с новыми товарами"""
         if not self.current_parsing_dir:
             self.start_parsing_session()
@@ -322,7 +328,59 @@ class DataService:
         print(f"Результаты с новыми товарами сохранены: {results_file}")
         self.save_new_products_to_sheets(new_products, results)
         
+        # Сохраняем новые товары в new_perspective_listings.json
+        if new_products:
+            self.save_new_perspective_listings(new_products, new_products_full_data)
+        
         return results_file
+    
+    def save_new_perspective_listings(self, new_products: Dict[str, str], new_products_full_data: Dict[str, Product] = None):
+        """Сохраняет новые товары в new_perspective_listings.json с полными данными из EverBee"""
+        from utils.everbee_client import EverBeeClient
+        
+        new_listings_file = os.path.join(self.tops_dir, "new_perspective_listings.json")
+        
+        # Загружаем существующие данные
+        existing_data = {"listings": {}}
+        if os.path.exists(new_listings_file):
+            try:
+                with open(new_listings_file, 'r', encoding='utf-8') as f:
+                    existing_data = json.load(f)
+            except Exception as e:
+                logging.error(f"Ошибка загрузки {new_listings_file}: {e}")
+        
+        # Получаем данные из EverBee пакетным запросом
+        everbee_client = EverBeeClient()
+        current_session = self.current_parsing_folder or datetime.now().strftime("%d.%m.%Y_%H.%M")
+        
+        # Получаем все данные одним запросом
+        listing_ids = list(new_products.keys())
+        everbee_data_batch = {}
+        
+        try:
+            if listing_ids:
+                batch_data = everbee_client.get_listings_batch(listing_ids)
+                if batch_data and 'results' in batch_data:
+                    for listing_info in batch_data['results']:
+                        listing_id = str(listing_info.get('listing_id', ''))
+                        everbee_data_batch[listing_id] = everbee_client.extract_listing_data(listing_info)
+        except Exception as e:
+            logging.error(f"Ошибка получения пакетных данных EverBee: {e}")
+        
+        # Добавляем данные в структуру
+        for listing_id, url in new_products.items():
+            if listing_id not in existing_data["listings"]:
+                existing_data["listings"][listing_id] = {}
+            
+            # Используем данные из пакетного запроса или только URL
+            everbee_data = everbee_data_batch.get(listing_id, {"url": url})
+            existing_data["listings"][listing_id][current_session] = everbee_data
+        
+        # Сохраняем обновленные данные
+        with open(new_listings_file, 'w', encoding='utf-8') as f:
+            json.dump(existing_data, f, ensure_ascii=False, indent=2)
+        
+        logging.info(f"Новые листинги с EverBee данными сохранены в {new_listings_file}: {len(new_products)} товаров")
     
     def save_new_products_to_sheets(self, new_products: Dict[str, str], results: Dict = None):
         """Сохраняет новые товары в Google Sheets"""

@@ -192,3 +192,5 @@ test_*.py
 *_test.py
 
 config-main.txt
+
+.amazonq

@@ -5,7 +5,7 @@ import time
 import logging
 from typing import List, Dict
 from config.settings import config
-from parsers.etsy_parser import EtsyParser
+from parsers.everbee_parser import EverBeeParser
 from services.data_service import DataService
 from services.tops_service import TopsService
 from models.product import Product
@@ -15,7 +15,7 @@ class EtsyMonitor:
     
     def __init__(self):
         self.config = config
-        self.parser = EtsyParser(config)
+        self.parser = EverBeeParser(config)
         self.data_service = DataService(config)
         self.tops_service = TopsService(self.data_service.tops_dir)
     
@@ -136,8 +136,17 @@ class EtsyMonitor:
         logging.debug(f"🔍 DEBUG: new_products_dict length = {len(new_products_dict) if new_products_dict else 0}")
         logging.debug(f"🔍 DEBUG: new_products_dict bool = {bool(new_products_dict)}")
         
+        # Находим полные данные новых товаров
+        new_products_full_data = {}
+        for listing_id in new_products_dict:
+            for shop_name, products in all_shop_products.items():
+                for product in products:
+                    if product.listing_id == listing_id:
+                        new_products_full_data[listing_id] = product
+                        break
+        
         # Сохраняем финальные результаты с новыми товарами
-        final_results_file = self.data_service.save_results_with_new_products(all_shop_products, new_products_dict)
+        final_results_file = self.data_service.save_results_with_new_products(all_shop_products, new_products_dict, new_products_full_data)
         
         # Анализируем новые товары через EverBee
         logging.debug(f"\n🔍 DEBUG: Проверка условия для EverBee...")

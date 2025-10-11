@@ -46,41 +46,69 @@ class AnalyticsService:
         return listing_ids
     
     def fetch_current_stats(self, listing_ids: List[str]) -> Dict[str, Dict]:
-        """Получает текущую статистику листингов через EverBee API"""
+        """Получает текущую статистику листингов через EverBee API пакетами по 64"""
         if not listing_ids:
             logging.warning("Нет листингов для получения статистики")
             return {}
         
         logging.info(f"Запрос статистики для {len(listing_ids)} листингов...")
         
-        response = self.everbee_client.get_listings_batch(listing_ids)
-        
-        if not response or "results" not in response:
-            logging.error("Не удалось получить данные от EverBee")
-            return {}
-        
         results = {}
-        for listing in response.get("results", []):
-            listing_id = str(listing.get("listing_id"))
-            if listing_id:
-                extracted_data = self.everbee_client.extract_listing_data(listing)
-                results[listing_id] = extracted_data
+        batch_size = 64
+        
+        # Разбиваем на пакеты по 64 листинга
+        for i in range(0, len(listing_ids), batch_size):
+            batch = listing_ids[i:i + batch_size]
+            logging.info(f"Обработка пакета {i//batch_size + 1}: {len(batch)} листингов")
+            
+            response = self.everbee_client.get_listings_batch(batch)
+            
+            if response and "results" in response:
+                for listing in response.get("results", []):
+                    listing_id = str(listing.get("listing_id"))
+                    if listing_id:
+                        extracted_data = self.everbee_client.extract_listing_data(listing)
+                        results[listing_id] = extracted_data
+            else:
+                logging.error(f"Не удалось получить данные для пакета {i//batch_size + 1}")
         
         logging.info(f"Получена статистика для {len(results)} листингов")
         return results
     
     def save_analytics_snapshot(self, stats: Dict[str, Dict], timestamp: str):
-        """Сохраняет снимок статистики с временной меткой"""
+        """Сохраняет снимок статистики с временной меткой и удаляет предыдущие снимки без изменений"""
         data = self._load_listings_data()
+        removed_count = 0
         
         for listing_id, listing_stats in stats.items():
             if listing_id not in data["listings"]:
                 data["listings"][listing_id] = {}
             
+            # Получаем список всех снимков для этого листинга
+            timestamps = sorted(data["listings"][listing_id].keys())
+            
+            # Если есть предыдущие снимки, проверяем на изменения
+            if len(timestamps) >= 1:
+                last_timestamp = timestamps[-1]
+                last_stats = data["listings"][listing_id][last_timestamp]
+                
+                # Проверяем, есть ли изменения
+                has_changes = False
+                for key in ["est_total_sales", "est_mo_sales", "est_reviews", "est_reviews_in_months", "views", "num_favorers", "conversion_rate"]:
+                    if last_stats.get(key) != listing_stats.get(key):
+                        has_changes = True
+                        break
+                
+                # Если нет изменений, удаляем предыдущий снимок
+                if not has_changes:
+                    del data["listings"][listing_id][last_timestamp]
+                    removed_count += 1
+            
+            # Добавляем новый снимок
             data["listings"][listing_id][timestamp] = listing_stats
         
         self._save_listings_data(data)
-        logging.info(f"Сохранен снимок аналитики для {len(stats)} листингов с меткой {timestamp}")
+        logging.info(f"Сохранен снимок аналитики для {len(stats)} листингов с меткой {timestamp} (удалено {removed_count} дубликатов)")
     
     def calculate_changes(self, listing_id: str, old_timestamp: str, new_timestamp: str) -> Dict:
         """Вычисляет изменения между двумя снимками статистики"""

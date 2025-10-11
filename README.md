@@ -67,10 +67,16 @@ python bot.py
 
 ## Конфигурация
 
-### Переменные окружения (.env)
+### Переменные окружения (config-main.txt)
 ```
 BOT_TOKEN=your_telegram_bot_token
 ADMIN_ID=your_telegram_user_id
+EVERBEE_USERNAME=your_everbee_email
+EVERBEE_PASSWORD=your_everbee_password
+
+# URL магазинов для парсинга
+https://www.etsy.com/shop/ShopName1
+https://www.etsy.com/shop/ShopName2
 ```
 
 ### Google Sheets API
@@ -84,11 +90,11 @@ ip:port:username:password
 
 ## Основные компоненты
 
-### EtsyParser
-- Парсинг товаров с первой страницы магазина
-- Обход блокировок и капчи
-- Автоматическая смена прокси
-- Обработка 403 ошибок
+### EverBeeParser
+- Парсинг товаров через EverBee API
+- Сортировка по новизне (новые товары сначала)
+- Получение только товаров за последний месяц
+- Быстрый и стабильный парсинг без блокировок
 
 ### EtsyMonitor
 - Мониторинг изменений в магазинах
