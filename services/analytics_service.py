@@ -99,8 +99,8 @@ class AnalyticsService:
                         has_changes = True
                         break
                 
-                # Если нет изменений, удаляем предыдущий снимок
-                if not has_changes:
+                # Если нет изменений, удаляем предыдущий снимок (кроме первого)
+                if not has_changes and len(timestamps) > 1 and last_timestamp != timestamps[0]:
                     del data["listings"][listing_id][last_timestamp]
                     removed_count += 1
             
