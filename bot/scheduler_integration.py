@@ -6,6 +6,7 @@ import logging
 import schedule
 import time
 import pytz
+import os
 from datetime import datetime, timezone
 from threading import Thread
 from typing import Optional
@@ -73,6 +74,27 @@ class ParserLock:
             return True
         except Exception as e:
             logging.error(f"Ошибка принудительной остановки: {e}")
+            return False
+    
+    def reset_if_stuck(self, timeout_minutes: int = 30):
+        """Сбрасывает блокировку если парсер завис"""
+        try:
+            if not os.path.exists(self.config_file):
+                return False
+            
+            # Проверяем время последнего изменения файла
+            file_time = os.path.getmtime(self.config_file)
+            current_time = time.time()
+            
+            # Если файл не менялся больше timeout_minutes и статус 'start'
+            if (current_time - file_time) > (timeout_minutes * 60) and self.is_running():
+                self.set_stopped()
+                logging.warning(f"Сброшена зависшая блокировка парсера (timeout: {timeout_minutes} мин)")
+                return True
+            
+            return False
+        except Exception as e:
+            logging.error(f"Ошибка проверки зависшей блокировки: {e}")
             return False
 
 class LoggingEtsyMonitor:
@@ -255,6 +277,9 @@ class BotScheduler:
     async def scheduled_parsing_job(self, user_id: int = None):
         """Задача парсинга с уведомлениями"""
         logger = None
+        
+        # Проверяем и сбрасываем зависшие блокировки
+        self.parser_lock.reset_if_stuck()
         
         # Проверяем блокировку парсера
         if self.parser_lock.is_running():
@@ -484,6 +509,10 @@ class BotScheduler:
             return
         
         try:
+            # Принудительно сбрасываем блокировку парсера при запуске планировщика
+            self.parser_lock.set_stopped()
+            logging.info("Блокировка парсера сброшена при запуске планировщика")
+            
             # Сохраняем ссылку на текущий event loop
             self.main_loop = asyncio.get_event_loop()
             
