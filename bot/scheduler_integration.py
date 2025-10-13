@@ -431,17 +431,12 @@ class BotScheduler:
     async def update_schedule(self):
         """Обновление расписания с умным расчетом времени"""
         try:
-            # Очищаем старое расписание
             schedule.clear()
             
-            # Получаем новые настройки
             schedule_time, schedule_day = await self.db.get_scheduler_settings()
-            
-            # Получаем текущее время МСК
             moscow_time = datetime.now(self.moscow_tz)
             current_weekday = moscow_time.strftime('%A').lower()
             
-            # Маппинг дней недели
             day_mapping = {
                 "monday": schedule.every().monday,
                 "tuesday": schedule.every().tuesday,
@@ -453,29 +448,31 @@ class BotScheduler:
             }
             
             if schedule_day in day_mapping:
-                # Проверяем, если сегодня тот же день недели
+                # Всегда создаем еженедельное расписание
+                day_mapping[schedule_day].at(schedule_time).do(self._schedule_job_wrapper)
+                
+                # Если сегодня тот же день и время еще не прошло - создаем отдельную задачу на сегодня
                 if current_weekday == schedule_day:
-                    # Парсим время запуска (с timezone)
                     schedule_hour, schedule_minute = map(int, schedule_time.split(':'))
                     schedule_datetime = moscow_time.replace(hour=schedule_hour, minute=schedule_minute, second=0, microsecond=0)
                     
-                    # Если время еще не прошло сегодня - запускаем сегодня
                     if moscow_time < schedule_datetime:
-                        # Для запуска сегодня используем специальную логику
-                        # Создаем задачу, которая запустится в указанное время сегодня
-                        job = schedule.every().day.at(schedule_time).do(self._schedule_job_wrapper)
-                        # Принудительно устанавливаем время следующего запуска на сегодня (без timezone)
-                        job.next_run = schedule_datetime.replace(tzinfo=None)
+                        # Вычисляем через сколько минут запуск
                         minutes_until = int((schedule_datetime - moscow_time).total_seconds() / 60)
-                        logging.info(f"Умное расписание: запуск СЕГОДНЯ в {schedule_time} (через {minutes_until} мин)")
+                        
+                        # Создаем одноразовую задачу на сегодня (в локальном времени системы)
+                        local_time = datetime.now()
+                        time_diff = schedule_datetime - moscow_time
+                        local_schedule_time = local_time + time_diff
+                        local_time_str = local_schedule_time.strftime('%H:%M')
+                        
+                        schedule.every().day.at(local_time_str).do(self._schedule_job_wrapper).tag('today')
+                        
+                        logging.info(f"Запуск СЕГОДНЯ в {schedule_time} МСК (через {minutes_until} мин) + еженедельно")
                     else:
-                        # Время уже прошло - запускаем на следующей неделе
-                        day_mapping[schedule_day].at(schedule_time).do(self._schedule_job_wrapper)
-                        logging.info(f"Умное расписание: время прошло, запуск на СЛЕДУЮЩЕЙ неделе")
+                        logging.info(f"Еженедельный запуск: каждый {schedule_day} в {schedule_time} МСК")
                 else:
-                    # Обычное расписание на другой день недели
-                    day_mapping[schedule_day].at(schedule_time).do(self._schedule_job_wrapper)
-                    logging.info(f"Обычное расписание: {schedule_day} в {schedule_time}")
+                    logging.info(f"Еженедельный запуск: каждый {schedule_day} в {schedule_time} МСК")
                 
                 logging.info(f"Текущее время МСК: {moscow_time.strftime('%Y-%m-%d %H:%M:%S')}")
                 
