@@ -143,11 +143,32 @@ class TopsService:
                 for lid in potential_tops:
                     data["listings"].pop(lid, None)
                 self._save_listings(data)
+                
+                # Отправляем топы в Google Sheets
+                self._send_tops_to_sheets(top_json["listings"])
                     
         except Exception as e:
             logging.error(f"Ошибка проверки возраста листингов: {e}")
         
         return potential_tops
+    
+    def _send_tops_to_sheets(self, top_listings: Dict):
+        """Отправляет топ-листинги в Google Sheets"""
+        try:
+            from config.settings import config
+            from services.google_sheets_service import GoogleSheetsService
+            
+            spreadsheet_id = config.google_sheets_spreadsheet_id
+            
+            if not spreadsheet_id:
+                logging.warning("Не указан google_sheets_spreadsheet_id в конфиге")
+                return
+            
+            sheets_service = GoogleSheetsService(config)
+            sheets_service.add_top_listings_to_sheets(spreadsheet_id, top_listings)
+            
+        except Exception as e:
+            logging.error(f"Ошибка отправки топов в Google Sheets: {e}")
     
     def format_top_hit_message(self, summary: Dict) -> str:
         """Форматирует сообщение о топ-хите"""

@@ -99,6 +99,71 @@ class GoogleSheetsService:
         except Exception as e:
             print(f"❌ Ошибка при добавлении товаров в Google Sheets: {e}")
     
+    def add_top_listings_to_sheets(self, spreadsheet_id: str, top_listings: Dict, sheet_name: str = "Top Listings"):
+        if not self.enabled:
+            print("⚠️ Google Sheets не настроен, пропускаем сохранение")
+            return
+        
+        if not top_listings:
+            print("📊 Нет топ-листингов для добавления в Google Sheets")
+            return
+        
+        try:
+            print(f"📊 Добавление {len(top_listings)} топ-хитов в лист '{sheet_name}'...")
+            
+            spreadsheet = self.client.open_by_key(spreadsheet_id)
+            
+            try:
+                worksheet = spreadsheet.worksheet(sheet_name)
+            except gspread.WorksheetNotFound:
+                print(f"📊 Создание нового листа '{sheet_name}'...")
+                worksheet = spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=8)
+                worksheet.update('A1:H1', [[
+                    'Ссылка на товар',
+                    'Когда появился',
+                    'Когда стал хитом',
+                    'Просмотры (начало)',
+                    'Просмотры (хит)',
+                    'Лайки (начало)',
+                    'Лайки (хит)',
+                    'Отзывы'
+                ]])
+            
+            rows_to_add = []
+            for listing_id, data in top_listings.items():
+                # Конвертируем формат даты из "12.10.2025_15.29" в "2025-10-12 15:29"
+                def convert_date(date_str):
+                    try:
+                        dt = datetime.strptime(date_str, "%d.%m.%Y_%H.%M")
+                        return dt.strftime("%Y-%m-%d %H:%M")
+                    except:
+                        return date_str
+                
+                rows_to_add.append([
+                    data['url'],
+                    convert_date(data['discovered_at']),
+                    convert_date(data['became_hit_at']),
+                    data['views_start'],
+                    data['views_hit'],
+                    data['likes_start'],
+                    data['likes_hit'],
+                    data['reviews']
+                ])
+            
+            existing_data = worksheet.get_all_values()[1:]
+            all_data = rows_to_add + existing_data
+            
+            if all_data:
+                worksheet.batch_clear([f'A2:H{len(existing_data) + len(rows_to_add) + 1}'])
+                range_name = f'A2:H{len(all_data) + 1}'
+                worksheet.update(range_name, all_data)
+                
+                print(f"✅ Добавлено {len(rows_to_add)} топ-хитов в Google Sheets (сверху)")
+                print(f"📊 Общее количество записей: {len(all_data)}")
+            
+        except Exception as e:
+            print(f"❌ Ошибка при добавлении топ-хитов в Google Sheets: {e}")
+    
     def test_connection(self, spreadsheet_id: str) -> bool:
         if not self.enabled:
             return False
