@@ -109,6 +109,9 @@ class AnalyticsService:
         
         self._save_listings_data(data)
         logging.info(f"Сохранен снимок аналитики для {len(stats)} листингов с меткой {timestamp} (удалено {removed_count} дубликатов)")
+        
+        # Проверяем возраст листингов
+        self._check_listings_age(data, timestamp)
     
     def calculate_changes(self, listing_id: str, old_timestamp: str, new_timestamp: str) -> Dict:
         """Вычисляет изменения между двумя снимками статистики"""
@@ -164,6 +167,47 @@ class AnalyticsService:
         timestamps = list(data["listings"][listing_id].keys())
         timestamps.sort()
         return timestamps
+    
+    def _check_listings_age(self, data: Dict, current_date: str):
+        """Проверяет возраст листингов и логирует те, что старше 1 дня"""
+        try:
+            current_dt = datetime.strptime(current_date, "%d.%m.%Y_%H.%M")
+            
+            for listing_id, snapshots in data.get("listings", {}).items():
+                if not snapshots:
+                    continue
+                
+                timestamps = sorted(snapshots.keys())
+                first_ts = timestamps[0]
+                last_ts = timestamps[-1]
+                
+                try:
+                    first_dt = datetime.strptime(first_ts, "%d.%m.%Y_%H.%M")
+                    days_diff = (current_dt.date() - first_dt.date()).days
+                    
+                    if days_diff > 0:
+                        first_data = snapshots.get(first_ts, {})
+                        last_data = snapshots.get(last_ts, {})
+                        url = last_data.get("url", "")
+                        
+                        views_start = first_data.get("views", 0)
+                        views_end = last_data.get("views", 0)
+                        likes_start = first_data.get("num_favorers", 0)
+                        likes_end = last_data.get("num_favorers", 0)
+                        
+                        views_growth = views_end - views_start
+                        likes_growth = likes_end - likes_start
+                        
+                        logging.info(
+                            f"Листинг {listing_id} отслеживается {days_diff} дн. "
+                            f"(с {first_ts} до {current_date}) | Просм.: +{views_growth} | Лайки: +{likes_growth} | {url}"
+                        )
+                            
+                except Exception:
+                    continue
+                    
+        except Exception as e:
+            logging.error(f"Ошибка проверки возраста листингов: {e}")
     
     def run_analytics(self) -> Tuple[str, Dict[str, Dict]]:
         """Запускает процесс аналитики: получает текущую статистику и сохраняет"""

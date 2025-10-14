@@ -666,10 +666,36 @@ async def run_analytics(message: Message, db: BotDatabase):
                 )
                 return
             
+            # Проверяем топы после аналитики
+            from services.tops_service import TopsService
+            tops_service = TopsService()
+            data = analytics_service._load_listings_data()
+            potential_tops = tops_service._check_listings_age(data, timestamp)
+            
+            # Отправляем уведомления о топах всем админам
+            if potential_tops:
+                top_listings_data = tops_service._load_top_listings()
+                admins = await db.get_all_admins()
+                
+                for listing_id in potential_tops:
+                    if listing_id in top_listings_data.get("listings", {}):
+                        summary = top_listings_data["listings"][listing_id]
+                        top_message = tops_service.format_top_hit_message(summary)
+                        
+                        for admin_id, _ in admins:
+                            try:
+                                from bot.notifications import NotificationService
+                                notification_service = NotificationService(message.bot, db)
+                                await notification_service.send_message_to_user(admin_id, top_message)
+                            except Exception as e:
+                                logging.error(f"Ошибка отправки уведомления о топе {admin_id}: {e}")
+            
+            tops_msg = f"\n🔥 Найдено {len(potential_tops)} топ-хитов!" if potential_tops else ""
+            
             await message.answer(
                 f"✅ Данные получены и сохранены!\n\n"
                 f"📅 Временная метка: {timestamp}\n"
-                f"📦 Обновлено листингов: {len(current_stats)}\n\n"
+                f"📦 Обновлено листингов: {len(current_stats)}{tops_msg}\n\n"
                 f"🔄 Формирование отчета об изменениях..."
             )
             

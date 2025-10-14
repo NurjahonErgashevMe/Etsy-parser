@@ -17,13 +17,6 @@ class TopsService:
         self.everbee_client = EverBeeClient()
         self.listings_file = os.path.join(self.tops_dir, "new_perspective_listings.json")
         self.top_listings_file = os.path.join(self.tops_dir, "top-listings.json")
-        self.archived_listings_file = os.path.join(self.tops_dir, "archived_listings.json")
-        # Порог зрелости и метрики топа
-        self.maturity_days = 60  # ~2 месяца
-        self.views_threshold = 25.0  # ~25 просмотров/день
-        self.likes_threshold = 1.0   # ~1 лайк/день
-        self.tolerance = 0.8         # Допуск 20%
-        # Колбэк-уведомитель (опционально)
         self.notifier: Optional[Callable[[Dict], None]] = None
         os.makedirs(self.tops_dir, exist_ok=True)
     
@@ -67,28 +60,111 @@ class TopsService:
         except Exception as e:
             logging.error(f"Ошибка сохранения топ-листингов: {e}")
 
-    def _load_archived_listings(self) -> Dict:
-        """Загружает архив листингов"""
-        if os.path.exists(self.archived_listings_file):
-            try:
-                with open(self.archived_listings_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except Exception as e:
-                logging.error(f"Ошибка загрузки архива: {e}")
-        return {"listings": {}}
 
-    def _save_archived_listings(self, data: Dict):
-        """Сохраняет архив листингов"""
-        try:
-            with open(self.archived_listings_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            logging.info(f"Архив листингов сохранен: {self.archived_listings_file}")
-        except Exception as e:
-            logging.error(f"Ошибка сохранения архива: {e}")
 
     def set_notifier(self, notifier: Callable[[Dict], None]):
         """Устанавливает колбэк для уведомлений о топах"""
         self.notifier = notifier
+
+    def _check_listings_age(self, data: Dict, current_date: str) -> List[str]:
+        """Проверяет возраст листингов и находит потенциальные топы"""
+        potential_tops = []
+        try:
+            current_dt = datetime.strptime(current_date, "%d.%m.%Y_%H.%M")
+            top_json = self._load_top_listings()
+            
+            for listing_id, snapshots in data.get("listings", {}).items():
+                if not snapshots:
+                    continue
+                
+                timestamps = sorted(snapshots.keys())
+                first_ts = timestamps[0]
+                last_ts = timestamps[-1]
+                
+                try:
+                    first_dt = datetime.strptime(first_ts, "%d.%m.%Y_%H.%M")
+                    days_diff = (current_dt.date() - first_dt.date()).days
+                    
+                    if days_diff > 0:
+                        first_data = snapshots.get(first_ts, {})
+                        last_data = snapshots.get(last_ts, {})
+                        url = last_data.get("url", "")
+                        
+                        views_start = first_data.get("views", 0)
+                        views_end = last_data.get("views", 0)
+                        likes_start = first_data.get("num_favorers", 0)
+                        likes_end = last_data.get("num_favorers", 0)
+                        
+                        views_growth = views_end - views_start
+                        likes_growth = likes_end - likes_start
+                        
+                        logging.info(
+                            f"Листинг {listing_id} отслеживается {days_diff} дн. "
+                            f"(с {first_ts} до {current_date}) {url}"
+                        )
+                        
+                        # Проверяем условия для топа: +20 просмотров и +5 лайков
+                        if views_growth >= 20 and likes_growth >= 5:
+                            logging.info(
+                                f"🔥 ПОТЕНЦИАЛЬНЫЙ ТОП: {listing_id} | "
+                                f"Просмотры: +{views_growth} | Лайки: +{likes_growth} | {url}"
+                            )
+                            
+                            # Сохраняем в топы
+                            summary = {
+                                "listing_id": listing_id,
+                                "url": url,
+                                "discovered_at": first_ts,
+                                "became_hit_at": last_ts,
+                                "views_start": views_start,
+                                "views_hit": views_end,
+                                "likes_start": likes_start,
+                                "likes_hit": likes_end,
+                                "reviews": last_data.get("est_reviews", 0),
+                                "days_observed": days_diff
+                            }
+                            
+                            top_json.setdefault("listings", {})
+                            top_json["listings"][listing_id] = summary
+                            potential_tops.append(listing_id)
+                            
+                            print(
+                                f"🔥 Топ-хит: {listing_id} | "
+                                f"Просмотры: +{views_growth} | Лайки: +{likes_growth} | {url}"
+                            )
+                            
+                except Exception:
+                    continue
+            
+            # Сохраняем топы и удаляем их из перспективных
+            if potential_tops:
+                self._save_top_listings(top_json)
+                # Удаляем топы из перспективных листингов
+                for lid in potential_tops:
+                    data["listings"].pop(lid, None)
+                self._save_listings(data)
+                    
+        except Exception as e:
+            logging.error(f"Ошибка проверки возраста листингов: {e}")
+        
+        return potential_tops
+    
+    def format_top_hit_message(self, summary: Dict) -> str:
+        """Форматирует сообщение о топ-хите"""
+        return f"""🔥 <b>НАЙДЕН ТОП-ХИТ!</b>
+
+🔗 <b>Ссылка:</b> <a href='{summary['url']}'>Открыть на Etsy</a>
+
+📅 <b>Когда появился:</b> {summary['discovered_at']}
+🎆 <b>Когда стал хитом:</b> {summary['became_hit_at']}
+
+👀 <b>Просмотры:</b> {summary['views_start']} → {summary['views_hit']} (+{summary['views_hit'] - summary['views_start']})
+❤️ <b>Лайки:</b> {summary['likes_start']} → {summary['likes_hit']} (+{summary['likes_hit'] - summary['likes_start']})
+⭐ <b>Отзывы:</b> {summary['reviews']}
+
+📈 <b>Дней наблюдения:</b> {summary['days_observed']}"""
+        
+        return potential_tops
 
     def cleanup_perspective_from_tops(self) -> int:
         """Удаляет из new_perspective_listings.json листинги, которые уже есть в топах.
@@ -163,108 +239,22 @@ class TopsService:
         
         self._save_listings(existing_data)
         
+        # Проверяем листинги старше 1 дня и находим топы
+        potential_tops = self._check_listings_age(existing_data, checked_date)
+        
+        # Удаляем новые топы из перспективных
+        if potential_tops:
+            for lid in potential_tops:
+                existing_data["listings"].pop(lid, None)
+            self._save_listings(existing_data)
+        
         logging.info(f"Обновлено {saved_count} листингов с датой {checked_date} (пропущено как топ: {skipped_top})")
         print(f"💎 Сохранено {saved_count} перспективных листингов в tops/ (пропущено как топ: {skipped_top})")
+        
+        if potential_tops:
+            print(f"🔥 Найдено {len(potential_tops)} потенциальных топ-хитов!")
 
-    def evaluate_matured_listings(self) -> Dict[str, Dict]:
-        """Оценивает листинги, достигшие зрелости (~2 месяца), и классифицирует их как ТОП или в Архив.
-        Условия ТОП: ~25 просмотров/день и ~1 лайк/день (с допуском).
-        Возвращает словарь с добавленными топами и архивированными ID.
-        """
-        data = self._load_existing_listings()
-        all_listings = data.get("listings", {})
-        if not all_listings:
-            return {"top": {}, "archived": []}
 
-        top_json = self._load_top_listings()
-        archived_json = self._load_archived_listings()
-
-        top_added: Dict[str, Dict] = {}
-        archived_ids: List[str] = []
-        now = datetime.now()
-        to_remove: List[str] = []
-
-        for listing_id, snapshots in all_listings.items():
-            if not snapshots:
-                continue
-            timestamps = sorted(snapshots.keys())
-            first_ts = timestamps[0]
-            last_ts = timestamps[-1]
-            try:
-                first_dt = datetime.strptime(first_ts, "%d.%m.%Y_%H.%M")
-                last_dt = datetime.strptime(last_ts, "%d.%m.%Y_%H.%M")
-            except Exception:
-                # Неверный формат метки времени — пропускаем
-                continue
-
-            # Проверяем зрелость (2 мес ~ 60 дней)
-            if (now - first_dt).days < self.maturity_days:
-                continue
-
-            days_observed = max((last_dt - first_dt).days, 1)
-            first_data = snapshots.get(first_ts, {})
-            last_data = snapshots.get(last_ts, {})
-
-            v_start = (first_data.get("views") or 0)
-            v_end = (last_data.get("views") or 0)
-            f_start = (first_data.get("num_favorers") or 0)
-            f_end = (last_data.get("num_favorers") or 0)
-
-            views_per_day = (v_end - v_start) / days_observed if days_observed else 0.0
-            likes_per_day = (f_end - f_start) / days_observed if days_observed else 0.0
-
-            is_top = (
-                views_per_day >= self.views_threshold * self.tolerance and
-                likes_per_day >= self.likes_threshold * self.tolerance
-            )
-
-            summary = {
-                "listing_id": listing_id,
-                "discovered_at": first_ts,
-                "last_checked": last_ts,
-                "url": last_data.get("url", ""),
-                "days_observed": days_observed,
-                "avg_views_per_day": round(views_per_day, 2),
-                "avg_likes_per_day": round(likes_per_day, 2),
-            }
-
-            if is_top:
-                top_json.setdefault("listings", {})
-                top_json["listings"][listing_id] = summary
-                top_added[listing_id] = summary
-                print(
-                    f"🔝 Топ-хит: {listing_id} "
-                    f"({summary['avg_views_per_day']}/день, {summary['avg_likes_per_day']}/день) "
-                    f"{summary['url']}"
-                )
-                if self.notifier:
-                    try:
-                        self.notifier(summary)
-                    except Exception as e:
-                        logging.error(f"Ошибка уведомления для топ листинга {listing_id}: {e}")
-            else:
-                archived_json.setdefault("listings", {})
-                archived_json["listings"][listing_id] = {**summary, "reason": "below_threshold"}
-                archived_ids.append(listing_id)
-                print(
-                    f"🗄️ Архив: {listing_id} "
-                    f"({summary['avg_views_per_day']}/день, {summary['avg_likes_per_day']}/день) "
-                    f"{summary['url']}"
-                )
-
-            to_remove.append(listing_id)
-
-        # Удаляем классифицированные из перспективных и сохраняем результаты
-        if to_remove:
-            for lid in to_remove:
-                data["listings"].pop(lid, None)
-            self._save_listings(data)
-            if top_added:
-                self._save_top_listings(top_json)
-            if archived_ids:
-                self._save_archived_listings(archived_json)
-
-        return {"top": top_added, "archived": archived_ids}
     
     def process_new_products(self, new_products: Dict[str, str], checked_date: str = None):
         """Обрабатывает новые товары: анализирует и сохраняет"""
@@ -286,11 +276,6 @@ class TopsService:
         
         if listings_data:
             self.update_listings_data(listings_data, checked_date)
-            eval_result = self.evaluate_matured_listings()
-            top_count = len(eval_result.get("top", {})) if eval_result else 0
-            archived_count = len(eval_result.get("archived", [])) if eval_result else 0
-            if top_count or archived_count:
-                print(f"🏁 Итог: в топ добавлено {top_count}, в архив {archived_count}")
             print(f"✅ Анализ завершен успешно")
         else:
             print("⚠️ Не удалось получить данные от EverBee")
