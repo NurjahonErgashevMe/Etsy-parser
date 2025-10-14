@@ -76,7 +76,7 @@ class AnalyticsService:
         return results
     
     def save_analytics_snapshot(self, stats: Dict[str, Dict], timestamp: str):
-        """Сохраняет снимок статистики с временной меткой и удаляет предыдущие снимки без изменений"""
+        """Сохраняет снимок статистики и удаляет предыдущий снимок (кроме первого)"""
         data = self._load_listings_data()
         removed_count = 0
         
@@ -84,31 +84,23 @@ class AnalyticsService:
             if listing_id not in data["listings"]:
                 data["listings"][listing_id] = {}
             
-            # Получаем список всех снимков для этого листинга
             timestamps = sorted(data["listings"][listing_id].keys())
             
-            # Если есть предыдущие снимки, проверяем на изменения
-            if len(timestamps) >= 1:
-                last_timestamp = timestamps[-1]
-                last_stats = data["listings"][listing_id][last_timestamp]
+            # Если есть более 2 снимков, удаляем предпоследний
+            if len(timestamps) >= 2:
+                first_timestamp = timestamps[0]
+                previous_timestamp = timestamps[-1]  # Предыдущий (текущий последний)
                 
-                # Проверяем, есть ли изменения
-                has_changes = False
-                for key in ["est_total_sales", "est_mo_sales", "est_reviews", "est_reviews_in_months", "views", "num_favorers", "conversion_rate"]:
-                    if last_stats.get(key) != listing_stats.get(key):
-                        has_changes = True
-                        break
-                
-                # Если нет изменений, удаляем предыдущий снимок (кроме первого)
-                if not has_changes and len(timestamps) > 1 and last_timestamp != timestamps[0]:
-                    del data["listings"][listing_id][last_timestamp]
+                # Удаляем предыдущий снимок, если он не первый
+                if previous_timestamp != first_timestamp:
+                    del data["listings"][listing_id][previous_timestamp]
                     removed_count += 1
             
             # Добавляем новый снимок
             data["listings"][listing_id][timestamp] = listing_stats
         
         self._save_listings_data(data)
-        logging.info(f"Сохранен снимок аналитики для {len(stats)} листингов с меткой {timestamp} (удалено {removed_count} дубликатов)")
+        logging.info(f"Сохранен снимок аналитики для {len(stats)} листингов с меткой {timestamp} (удалено {removed_count} предыдущих снимков)")
         
         # Проверяем возраст листингов
         self._check_listings_age(data, timestamp)
@@ -222,12 +214,53 @@ class AnalyticsService:
         current_stats = self.fetch_current_stats(listing_ids)
         
         if current_stats:
-            self.save_analytics_snapshot(current_stats, timestamp)
+            # Сначала добавляем новый снимок БЕЗ удаления предыдущего
+            self._add_snapshot_without_cleanup(current_stats, timestamp)
         
         return timestamp, current_stats
     
+    def _add_snapshot_without_cleanup(self, stats: Dict[str, Dict], timestamp: str):
+        """Добавляет новый снимок БЕЗ удаления предыдущего"""
+        data = self._load_listings_data()
+        
+        for listing_id, listing_stats in stats.items():
+            if listing_id not in data["listings"]:
+                data["listings"][listing_id] = {}
+            
+            data["listings"][listing_id][timestamp] = listing_stats
+        
+        self._save_listings_data(data)
+        logging.info(f"Добавлен новый снимок для {len(stats)} листингов с меткой {timestamp}")
+        
+        # Проверяем возраст листингов
+        self._check_listings_age(data, timestamp)
+    
+    def cleanup_old_snapshots(self):
+        """Удаляет предыдущие снимки (кроме первого и последнего)"""
+        data = self._load_listings_data()
+        removed_count = 0
+        
+        for listing_id in data["listings"]:
+            timestamps = sorted(data["listings"][listing_id].keys())
+            
+            # Если есть более 2 снимков, удаляем все кроме первого и последнего
+            if len(timestamps) > 2:
+                first_timestamp = timestamps[0]
+                last_timestamp = timestamps[-1]
+                
+                # Удаляем все промежуточные снимки
+                for ts in timestamps[1:-1]:
+                    del data["listings"][listing_id][ts]
+                    removed_count += 1
+        
+        if removed_count > 0:
+            self._save_listings_data(data)
+            logging.info(f"Удалено {removed_count} промежуточных снимков")
+        
+        return removed_count
+    
     def generate_changes_report(self) -> List[Dict]:
-        """Генерирует отчет об изменениях для всех листингов (сравнение с первым снимком)"""
+        """Генерирует отчет об изменениях для всех листингов (сравнение с предыдущим снимком)"""
         data = self._load_listings_data()
         report = []
         
@@ -237,15 +270,16 @@ class AnalyticsService:
             if len(timestamps) < 2:
                 continue
             
-            first_timestamp = timestamps[0]
+            # Сравниваем предпоследний и последний снимки
+            previous_timestamp = timestamps[-2]
             latest_timestamp = timestamps[-1]
             
-            changes = self.calculate_changes(listing_id, first_timestamp, latest_timestamp)
+            changes = self.calculate_changes(listing_id, previous_timestamp, latest_timestamp)
             
             if changes:
                 report.append({
                     "listing_id": listing_id,
-                    "old_timestamp": first_timestamp,
+                    "old_timestamp": previous_timestamp,
                     "new_timestamp": latest_timestamp,
                     "changes": changes,
                     "url": timestamps_data[latest_timestamp].get("url", "")

@@ -103,6 +103,9 @@ class AnalyticsScheduler:
             
             report = self.analytics_service.generate_changes_report()
             
+            # Удаляем промежуточные снимки после сравнения
+            self.analytics_service.cleanup_old_snapshots()
+            
             if not report:
                 msg = "ℹ️ Это первый снимок статистики или нет изменений."
                 if user_id:

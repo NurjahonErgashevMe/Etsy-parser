@@ -706,6 +706,9 @@ async def run_analytics(message: Message, db: BotDatabase):
             
             report = analytics_service.generate_changes_report()
             
+            # Теперь удаляем промежуточные снимки (после сравнения)
+            analytics_service.cleanup_old_snapshots()
+            
             if not report:
                 await message.answer(
                     "ℹ️ Это первый снимок статистики или нет изменений.\n\n"
