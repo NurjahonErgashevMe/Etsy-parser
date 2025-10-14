@@ -32,6 +32,11 @@ class EverBeeParser(BaseParser):
         
         logging.info(f"📄 Парсим магазин через EverBee API: {shop_name}")
         
+        # Проверяем токен перед запросом
+        if not self.everbee_client.ensure_token():
+            logging.error(f"❌ Не удалось получить валидный токен для магазина {shop_name}")
+            return []
+        
         # Получаем листинги отсортированные по возрасту (новые сначала)
         response = self.everbee_client.get_shop_listings(
             shop_name=shop_name,

@@ -112,7 +112,7 @@ class EverBeeClient:
         
         driver = None
 
-        logging.debug(f'DEBUG: username = {self.username} password = {self.password}')
+        logging.info(f"Авторизация EverBee для пользователя: {self.username}")
         
         try:
             driver = webdriver.Chrome(options=chrome_options)
@@ -123,8 +123,27 @@ class EverBeeClient:
             password_field = driver.find_element(By.ID, "password")
             submit_btn = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
             
+            # Очищаем поля и заполняем
+            import time
+            from selenium.webdriver.common.keys import Keys
+            
+            # Очищаем поле email и заполняем
+            email_field.click()
+            email_field.send_keys(Keys.CONTROL + "a")
+            email_field.send_keys(Keys.DELETE)
+            time.sleep(0.5)
             email_field.send_keys(self.username)
+            
+            # Очищаем поле password и заполняем
+            password_field.click()
+            password_field.send_keys(Keys.CONTROL + "a")
+            password_field.send_keys(Keys.DELETE)
+            time.sleep(0.5)
             password_field.send_keys(self.password)
+            
+            # Пауза перед отправкой
+            time.sleep(1)
+            
             submit_btn.click()
             
             wait.until(lambda d: d.current_url != self.AUTH_URL)
@@ -167,10 +186,9 @@ class EverBeeClient:
     
     def get_listings_batch(self, listing_ids: List[str]) -> Optional[Dict]:
         """Получает данные нескольких листингов одним запросом"""
-        if not self.token:
-            if not self.ensure_token():
-                logging.error("Не удалось получить валидный токен")
-                return None
+        if not self.ensure_token():
+            logging.error("Не удалось получить валидный токен")
+            return None
         
         headers = {'x-access-token': self.token}
         
@@ -181,6 +199,20 @@ class EverBeeClient:
                 json={"listing_ids": listing_ids},
                 timeout=30
             )
+            
+            if response.status_code == 401:
+                logging.warning("Токен недействителен, получаем новый...")
+                if self.refresh_token():
+                    headers = {'x-access-token': self.token}
+                    response = requests.post(
+                        self.LISTINGS_BATCH_URL, 
+                        headers=headers, 
+                        json={"listing_ids": listing_ids},
+                        timeout=30
+                    )
+                else:
+                    logging.error("Не удалось обновить токен")
+                    return None
             
             if response.status_code == 200:
                 return response.json()
@@ -211,10 +243,9 @@ class EverBeeClient:
                            time_range: str = "last_1_month", order_direction: str = "asc", 
                            page: int = 1, per_page: int = 20) -> Optional[Dict]:
         """Получает листинги магазина с сортировкой"""
-        if not self.token:
-            if not self.ensure_token():
-                logging.error("Не удалось получить валидный токен")
-                return None
+        if not self.ensure_token():
+            logging.error("Не удалось получить валидный токен")
+            return None
         
         headers = {'x-access-token': self.token}
         params = {
@@ -233,6 +264,20 @@ class EverBeeClient:
                 params=params,
                 timeout=30
             )
+            
+            if response.status_code == 401:
+                logging.warning(f"Токен недействителен для магазина {shop_name}, получаем новый...")
+                if self.refresh_token():
+                    headers = {'x-access-token': self.token}
+                    response = requests.get(
+                        self.SHOP_ANALYZE_URL, 
+                        headers=headers, 
+                        params=params,
+                        timeout=30
+                    )
+                else:
+                    logging.error("Не удалось обновить токен")
+                    return None
             
             if response.status_code == 200:
                 return response.json()
