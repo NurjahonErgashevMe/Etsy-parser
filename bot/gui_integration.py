@@ -19,6 +19,7 @@ from bot.database import BotDatabase
 from bot.handlers import router
 from bot.notifications import NotificationService
 from bot.scheduler_integration import BotScheduler
+from bot.analytics_scheduler import AnalyticsScheduler
 from utils.config_loader import config_loader
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,7 @@ class TelegramBotGUI:
         self.db = None
         self.notification_service = None
         self.scheduler = None
+        self.analytics_scheduler = None
         self.running = False
         self._stop_event = asyncio.Event()
     
@@ -68,21 +70,27 @@ class TelegramBotGUI:
             # Создаем сервис уведомлений
             self.notification_service = NotificationService(self.bot, self.db)
             
-            # Создаем и запускаем планировщик
+            # Создаем и запускаем планировщик парсинга
             self.scheduler = BotScheduler(self.notification_service, self.db)
             await self.scheduler.start_scheduler()
+            
+            # Создаем и запускаем планировщик аналитики
+            self.analytics_scheduler = AnalyticsScheduler(self.notification_service, self.db)
+            await self.analytics_scheduler.start_scheduler()
             
             # Добавляем middleware
             @self.dp.message.middleware()
             async def database_middleware(handler, event, data):
                 data['db'] = self.db
                 data['scheduler'] = self.scheduler
+                data['analytics_scheduler'] = self.analytics_scheduler
                 return await handler(event, data)
             
             @self.dp.callback_query.middleware()
             async def callback_database_middleware(handler, event, data):
                 data['db'] = self.db
                 data['scheduler'] = self.scheduler
+                data['analytics_scheduler'] = self.analytics_scheduler
                 return await handler(event, data)
             
             # Регистрируем роутер
@@ -106,9 +114,11 @@ class TelegramBotGUI:
             self.running = False
             self._stop_event.set()
             
-            # Останавливаем планировщик
+            # Останавливаем планировщики
             if self.scheduler:
                 await self.scheduler.stop_scheduler()
+            if self.analytics_scheduler:
+                await self.analytics_scheduler.stop_scheduler()
             
             # Останавливаем диспетчер
             if self.dp:

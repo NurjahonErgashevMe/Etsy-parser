@@ -38,6 +38,18 @@ class BotDatabase:
                 )
             """)
             
+            # Таблица настроек планировщика аналитики
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS analytics_scheduler_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    schedule_time TEXT NOT NULL,
+                    schedule_day TEXT NOT NULL,
+                    is_active BOOLEAN DEFAULT 1,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_by INTEGER
+                )
+            """)
+            
             # Миграция: добавляем колонку description если её нет
             try:
                 await db.execute("ALTER TABLE admins ADD COLUMN description TEXT")
@@ -164,4 +176,33 @@ class BotDatabase:
         except Exception as e:
             logging.error(f"Ошибка получения настроек планировщика: {e}")
             return ("10:00", "monday")
+    
+    async def update_analytics_scheduler_settings(self, schedule_time: str, schedule_day: str, updated_by: int) -> bool:
+        """Обновление настроек планировщика аналитики"""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute("UPDATE analytics_scheduler_settings SET is_active = 0")
+                await db.execute(
+                    "INSERT INTO analytics_scheduler_settings (schedule_time, schedule_day, updated_by) VALUES (?, ?, ?)",
+                    (schedule_time, schedule_day, updated_by)
+                )
+                await db.commit()
+                logging.info(f"Настройки планировщика аналитики обновлены: {schedule_day} в {schedule_time}")
+                return True
+        except Exception as e:
+            logging.error(f"Ошибка обновления настроек планировщика аналитики: {e}")
+            return False
+    
+    async def get_analytics_scheduler_settings(self) -> Optional[Tuple[str, str]]:
+        """Получение текущих настроек планировщика аналитики"""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute(
+                    "SELECT schedule_time, schedule_day FROM analytics_scheduler_settings WHERE is_active = 1 ORDER BY id DESC LIMIT 1"
+                )
+                result = await cursor.fetchone()
+                return result if result else ("12:00", "monday")
+        except Exception as e:
+            logging.error(f"Ошибка получения настроек планировщика аналитики: {e}")
+            return ("12:00", "monday")
     

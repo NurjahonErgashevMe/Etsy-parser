@@ -148,3 +148,15 @@ def get_analytics_menu() -> ReplyKeyboardMarkup:
         resize_keyboard=True
     )
     return keyboard
+
+def get_analytics_settings_menu() -> ReplyKeyboardMarkup:
+    """Меню настроек аналитики"""
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🕐 Настроить расписание аналитики")],
+            [KeyboardButton(text="📋 Текущие настройки аналитики")],
+            [KeyboardButton(text="🔙 Назад")]
+        ],
+        resize_keyboard=True
+    )
+    return keyboard

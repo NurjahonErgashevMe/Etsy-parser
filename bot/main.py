@@ -13,6 +13,7 @@ from bot.database import BotDatabase
 from bot.handlers import router
 from bot.notifications import NotificationService
 from bot.scheduler_integration import BotScheduler
+from bot.analytics_scheduler import AnalyticsScheduler
 
 async def setup_bot_database(db: BotDatabase):
     """Настройка базы данных бота"""
@@ -57,22 +58,36 @@ async def main():
     # Создаем сервис уведомлений
     notification_service = NotificationService(bot, db)
     
-    # Создаем и запускаем планировщик
+    # Создаем и запускаем планировщик парсинга
+    logging.info("Создание планировщика парсинга...")
     scheduler = BotScheduler(notification_service, db)
     await scheduler.start_scheduler()
+    
+    # Создаем и запускаем планировщик аналитики
+    logging.info("Создание планировщика аналитики...")
+    analytics_scheduler = AnalyticsScheduler(notification_service, db)
+    logging.info(f"analytics_scheduler создан: {analytics_scheduler}")
+    await analytics_scheduler.start_scheduler()
+    logging.info(f"Оба планировщика запущены. analytics_scheduler: {analytics_scheduler}")
     
     # Добавляем зависимости в middleware
     @dp.message.middleware()
     async def database_middleware(handler, event, data):
         data['db'] = db
-        data['scheduler'] = scheduler  # Добавляем планировщик в контекст
+        data['scheduler'] = scheduler
+        data['analytics_scheduler'] = analytics_scheduler
+        logging.debug(f"Message middleware: analytics_scheduler={analytics_scheduler}")
         return await handler(event, data)
     
     @dp.callback_query.middleware()
     async def callback_database_middleware(handler, event, data):
         data['db'] = db
-        data['scheduler'] = scheduler  # Добавляем планировщик в контекст
+        data['scheduler'] = scheduler
+        data['analytics_scheduler'] = analytics_scheduler
+        logging.debug(f"Callback middleware: analytics_scheduler={analytics_scheduler}")
         return await handler(event, data)
+    
+    logging.info(f"Middleware настроен. analytics_scheduler: {analytics_scheduler}")
     
     # Регистрируем роутер
     dp.include_router(router)
@@ -84,8 +99,9 @@ async def main():
     except KeyboardInterrupt:
         logging.info("Получен сигнал остановки")
     finally:
-        # Останавливаем планировщик
+        # Останавливаем планировщики
         await scheduler.stop_scheduler()
+        await analytics_scheduler.stop_scheduler()
         
         # Закрываем сессию бота
         await bot.session.close()

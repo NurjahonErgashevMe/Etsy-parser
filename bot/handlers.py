@@ -14,7 +14,7 @@ from bot.keyboards import (
     get_main_menu, get_settings_menu, get_admin_menu,
     get_days_keyboard, get_time_keyboard, get_back_keyboard,
     get_description_keyboard, get_admin_list_keyboard, get_confirm_delete_keyboard,
-    get_analytics_menu
+    get_analytics_menu, get_analytics_settings_menu
 )
 from services.analytics_service import AnalyticsService
 
@@ -24,6 +24,11 @@ class AdminStates(StatesGroup):
     waiting_for_description = State()
 
 class ScheduleStates(StatesGroup):
+    waiting_for_day = State()
+    waiting_for_time = State()
+    waiting_for_custom_time = State()
+
+class AnalyticsScheduleStates(StatesGroup):
     waiting_for_day = State()
     waiting_for_time = State()
     waiting_for_custom_time = State()
@@ -733,26 +738,247 @@ async def run_analytics(message: Message, db: BotDatabase):
 
 @router.message(F.text == "⚙️ Настройки аналитики")
 async def analytics_settings(message: Message, db: BotDatabase):
-    """Настройки аналитики (заглушка)"""
+    """Настройки аналитики"""
     if not await db.is_admin(message.from_user.id):
         return
     
     await message.answer(
         "⚙️ Настройки аналитики\n\n"
-        "🚧 Раздел в разработке...",
-        reply_markup=get_analytics_menu()
+        "Выберите что хотите настроить:",
+        reply_markup=get_analytics_settings_menu()
     )
 
-@router.message(F.text == "🔙 Назад")
-async def back_to_main(message: Message, db: BotDatabase):
-    """Возврат в главное меню"""
+@router.message(F.text == "🕐 Настроить расписание аналитики")
+async def analytics_schedule_setup(message: Message, state: FSMContext, db: BotDatabase):
+    """Настройка расписания аналитики"""
     if not await db.is_admin(message.from_user.id):
         return
     
     await message.answer(
-        "🏠 Главное меню",
-        reply_markup=get_main_menu()
+        "📅 Настройка расписания аналитики\n\n"
+        "Выберите день недели для запуска аналитики:",
+        reply_markup=get_days_keyboard()
     )
+    await state.set_state(AnalyticsScheduleStates.waiting_for_day)
+
+@router.callback_query(F.data.startswith("day_"), StateFilter(AnalyticsScheduleStates.waiting_for_day))
+async def process_analytics_day_selection(callback: CallbackQuery, state: FSMContext):
+    """Обработка выбора дня недели для аналитики"""
+    day = callback.data.split("_")[1]
+    await state.update_data(selected_day=day)
+    
+    day_names = {
+        "monday": "Понедельник",
+        "tuesday": "Вторник", 
+        "wednesday": "Среда",
+        "thursday": "Четверг",
+        "friday": "Пятница",
+        "saturday": "Суббота",
+        "sunday": "Воскресенье"
+    }
+    
+    await callback.message.edit_text(
+        f"📅 Выбран день: {day_names.get(day, day)}\n\n"
+        "🕐 Теперь выберите время запуска:",
+        reply_markup=get_time_keyboard()
+    )
+    await state.set_state(AnalyticsScheduleStates.waiting_for_time)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("time_"), StateFilter(AnalyticsScheduleStates.waiting_for_time))
+async def process_analytics_time_selection(callback: CallbackQuery, state: FSMContext, db: BotDatabase, analytics_scheduler=None):
+    """Обработка выбора времени для аналитики"""
+    time = callback.data.split("_")[1]
+    data = await state.get_data()
+    selected_day = data.get("selected_day")
+    
+    success = await db.update_analytics_scheduler_settings(time, selected_day, callback.from_user.id)
+    
+    day_names = {
+        "monday": "Понедельник",
+        "tuesday": "Вторник",
+        "wednesday": "Среда", 
+        "thursday": "Четверг",
+        "friday": "Пятница",
+        "saturday": "Суббота",
+        "sunday": "Воскресенье"
+    }
+    
+    if success:
+        await callback.message.edit_text(
+            f"✅ Расписание аналитики успешно настроено!\n\n"
+            f"📅 День: {day_names.get(selected_day, selected_day)}\n"
+            f"🕐 Время: {time}\n\n"
+            f"🔄 Планировщик перезапускается..."
+        )
+        
+        if analytics_scheduler:
+            try:
+                logging.info(f"Перезапуск планировщика аналитики из callback. Scheduler: {analytics_scheduler}")
+                await analytics_scheduler.restart_scheduler()
+                await callback.message.edit_text(
+                    f"✅ Расписание аналитики успешно настроено!\n\n"
+                    f"📅 День: {day_names.get(selected_day, selected_day)}\n"
+                    f"🕐 Время: {time}\n\n"
+                    f"✅ Планировщик перезапущен."
+                )
+            except Exception as e:
+                logging.error(f"Ошибка перезапуска планировщика аналитики: {e}", exc_info=True)
+                await callback.message.edit_text(
+                    f"✅ Настройки сохранены, но возникла ошибка при перезапуске планировщика.\n\n"
+                    f"❌ Ошибка: {str(e)[:100]}\n\n"
+                    f"Перезапустите бота для применения изменений."
+                )
+        else:
+            logging.error("analytics_scheduler is None в callback обработчике!")
+            await callback.message.edit_text(
+                f"✅ Настройки сохранены!\n\n"
+                f"⚠️ Перезапустите бота для применения изменений."
+            )
+    else:
+        await callback.message.edit_text(
+            "❌ Ошибка при сохранении настроек. Попробуйте еще раз."
+        )
+    
+    await state.clear()
+    await callback.answer()
+
+@router.callback_query(F.data == "custom_time", StateFilter(AnalyticsScheduleStates.waiting_for_time))
+async def analytics_custom_time_input(callback: CallbackQuery, state: FSMContext):
+    """Обработка ввода времени вручную для аналитики"""
+    await callback.message.edit_text(
+        "✏️ Введите время в формате HH:MM\n\n"
+        "🕰️ Примеры: 3:43, 19:45, 08:30\n\n"
+        "⚠️ Время указывается по Московскому времени"
+    )
+    await state.set_state(AnalyticsScheduleStates.waiting_for_custom_time)
+    await callback.answer()
+
+@router.message(StateFilter(AnalyticsScheduleStates.waiting_for_custom_time))
+async def process_analytics_custom_time(message: Message, state: FSMContext, db: BotDatabase, analytics_scheduler=None):
+    """Обработка введенного времени для аналитики"""
+    time_text = message.text.strip()
+    
+    import re
+    time_pattern = r'^([0-9]|0[0-9]|1[0-9]|2[0-3]):([0-5][0-9])$'
+    
+    if not re.match(time_pattern, time_text):
+        await message.answer(
+            "❌ Неверный формат времени!\n\n"
+            "🕰️ Примеры правильного формата:\n"
+            "• 3:43\n"
+            "• 19:45\n"
+            "• 08:30\n\n"
+            "Попробуйте еще раз:"
+        )
+        return
+    
+    parts = time_text.split(':')
+    hour = int(parts[0])
+    minute = int(parts[1])
+    formatted_time = f"{hour:02d}:{minute:02d}"
+    
+    data = await state.get_data()
+    selected_day = data.get("selected_day")
+    
+    success = await db.update_analytics_scheduler_settings(formatted_time, selected_day, message.from_user.id)
+    
+    day_names = {
+        "monday": "Понедельник",
+        "tuesday": "Вторник",
+        "wednesday": "Среда",
+        "thursday": "Четверг",
+        "friday": "Пятница",
+        "saturday": "Суббота",
+        "sunday": "Воскресенье"
+    }
+    
+    if success:
+        await message.answer(
+            f"✅ Расписание аналитики успешно настроено!\n\n"
+            f"📅 День: {day_names.get(selected_day, selected_day)}\n"
+            f"🕰️ Время: {formatted_time}\n\n"
+            f"🔄 Планировщик перезапускается..."
+        )
+        
+        if analytics_scheduler:
+            try:
+                logging.info(f"Перезапуск планировщика аналитики из обработчика. Scheduler: {analytics_scheduler}")
+                await analytics_scheduler.restart_scheduler()
+                await message.answer(
+                    f"✅ Планировщик перезапущен!\n\n"
+                    f"🎆 Следующий запуск: {day_names.get(selected_day, selected_day)} в {formatted_time}",
+                    reply_markup=get_analytics_menu()
+                )
+            except Exception as e:
+                logging.error(f"Ошибка перезапуска планировщика аналитики: {e}", exc_info=True)
+                await message.answer(
+                    f"✅ Настройки сохранены, но возникла ошибка при перезапуске планировщика.\n\n"
+                    f"❌ Ошибка: {str(e)[:100]}\n\n"
+                    f"Перезапустите бота для применения изменений.",
+                    reply_markup=get_analytics_menu()
+                )
+        else:
+            logging.error("analytics_scheduler is None в обработчике!")
+            await message.answer(
+                f"✅ Настройки сохранены!\n\n"
+                f"⚠️ Перезапустите бота для применения изменений.",
+                reply_markup=get_analytics_menu()
+            )
+    else:
+        await message.answer(
+            "❌ Ошибка при сохранении настроек. Попробуйте еще раз.",
+            reply_markup=get_analytics_menu()
+        )
+    
+    await state.clear()
+
+@router.message(F.text == "📋 Текущие настройки аналитики")
+async def current_analytics_settings(message: Message, db: BotDatabase):
+    """Показать текущие настройки аналитики"""
+    if not await db.is_admin(message.from_user.id):
+        return
+    
+    schedule_time, schedule_day = await db.get_analytics_scheduler_settings()
+    
+    day_names = {
+        "monday": "Понедельник",
+        "tuesday": "Вторник",
+        "wednesday": "Среда",
+        "thursday": "Четверг", 
+        "friday": "Пятница",
+        "saturday": "Суббота",
+        "sunday": "Воскресенье"
+    }
+    
+    await message.answer(
+        f"📋 Текущие настройки аналитики:\n\n"
+        f"📅 День: {day_names.get(schedule_day, schedule_day)}\n"
+        f"🕐 Время: {schedule_time}\n\n"
+        f"⏰ Следующий запуск будет выполнен автоматически."
+    )
+
+@router.message(F.text == "🔙 Назад")
+async def back_to_main(message: Message, db: BotDatabase, state: FSMContext):
+    """Возврат в главное меню или предыдущее меню"""
+    if not await db.is_admin(message.from_user.id):
+        return
+    
+    current_state = await state.get_state()
+    
+    if current_state and "Analytics" in current_state:
+        await state.clear()
+        await message.answer(
+            "📈 Аналитика листингов\n\n"
+            "Отслеживайте изменения в статистике ваших перспективных листингов.",
+            reply_markup=get_analytics_menu()
+        )
+    else:
+        await state.clear()
+        await message.answer(
+            "🏠 Главное меню",
+            reply_markup=get_main_menu()
+        )
 
 @router.message()
 async def unknown_message(message: Message, db: BotDatabase):
