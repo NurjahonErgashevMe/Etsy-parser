@@ -685,29 +685,10 @@ async def run_analytics(message: Message, db: BotDatabase):
             
             formatted_message = analytics_service.format_changes_message(report)
             
-            max_length = 4000
-            if len(formatted_message) > max_length:
-                parts = []
-                current_part = ""
-                
-                for line in formatted_message.split('\n'):
-                    if len(current_part) + len(line) + 1 > max_length:
-                        parts.append(current_part)
-                        current_part = line + '\n'
-                    else:
-                        current_part += line + '\n'
-                
-                if current_part:
-                    parts.append(current_part)
-                
-                for i, part in enumerate(parts):
-                    if i == 0:
-                        await message.answer(part, parse_mode="HTML")
-                    else:
-                        await message.answer(f"📊 <b>Продолжение отчета ({i+1}/{len(parts)})</b>\n\n{part}", parse_mode="HTML")
-                    await asyncio.sleep(0.5)
-            else:
-                await message.answer(formatted_message, parse_mode="HTML")
+            # Используем новую функцию для отправки длинных сообщений
+            from bot.notifications import NotificationService
+            notification_service = NotificationService(message.bot, db)
+            await notification_service.send_long_message(message.from_user.id, formatted_message, "HTML")
             
             await message.answer(
                 "✅ Процесс аналитики завершен!",

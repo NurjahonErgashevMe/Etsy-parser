@@ -103,6 +103,7 @@ class LoggingEtsyMonitor:
     def __init__(self, monitor: EtsyMonitor, logger=None):
         self.monitor = monitor
         self.logger = logger
+        self.pending_logs = []
     
     def log_sync(self, message: str):
         """Добавляет запись в лог синхронно"""
@@ -136,6 +137,10 @@ class LoggingEtsyMonitor:
                 return []
             
             self.log_sync(f"📋 Найдено {len(links)} магазинов в Google Sheets")
+            
+            # Устанавливаем общее количество магазинов в логгере
+            if self.logger:
+                self.logger.set_total_shops(len(links))
             
             # Создаём папку для текущего сеанса парсинга
             parsing_dir = self.monitor.data_service.start_parsing_session()

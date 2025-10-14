@@ -19,7 +19,11 @@ class ParsingLogger:
         self.user_id = user_id
         self.log_message = None
         self.log_entries = []
-        self.max_message_length = 4000  # Лимит Telegram ~4096, оставляем запас
+        self.max_message_length = 4000
+        self.update_count = 0
+        self.max_updates = 5  # Максимум 5 обновлений сообщения
+        self.total_shops = 0
+        self.current_shop = 0
         
     async def start_logging(self):
         """Начинаем логирование - отправляем первое сообщение"""
@@ -32,14 +36,43 @@ class ParsingLogger:
         if self.log_message:
             self.log_entries.append("⏳ Инициализация...")
     
+    def set_total_shops(self, total: int):
+        """Устанавливаем общее количество магазинов"""
+        self.total_shops = total
+    
     async def add_log_entry(self, entry: str):
-        """Добавляем новую запись в лог"""
+        """Добавляем новую запись в лог с ограничением обновлений"""
         if not self.log_message:
             return
             
         self.log_entries.append(entry)
         
-        # Формируем новый текст сообщения
+        # Определяем, нужно ли обновлять сообщение
+        should_update = False
+        
+        if self.update_count < self.max_updates:
+            # Обновляем на ключевых этапах
+            if ("📋 Найдено" in entry or 
+                "🔍 Анализируем" in entry or 
+                "🎉 Найдено" in entry or 
+                "🧹 Очистка" in entry or
+                "❌" in entry or
+                "🛑" in entry):
+                should_update = True
+            
+            # Или каждые 20% прогресса парсинга магазинов
+            elif "🔄" in entry and self.total_shops > 0:
+                self.current_shop += 1
+                progress_percent = (self.current_shop / self.total_shops) * 100
+                if progress_percent >= (self.update_count + 1) * 20:
+                    should_update = True
+        
+        if should_update:
+            await self._update_message()
+            self.update_count += 1
+    
+    async def _update_message(self):
+        """Обновляем сообщение в Telegram"""
         new_text = "🚀 <b>Запуск парсинга</b>\n\n📋 <b>Лог процесса:</b>\n\n"
         
         # Добавляем записи, следя за лимитом длины
@@ -48,7 +81,7 @@ class ParsingLogger:
         
         # Идем с конца, чтобы показать самые свежие записи
         for entry in reversed(self.log_entries):
-            entry_length = len(entry) + 1  # +1 для \n
+            entry_length = len(entry) + 1
             if temp_length + entry_length > self.max_message_length:
                 break
             temp_entries.insert(0, entry)
@@ -60,7 +93,9 @@ class ParsingLogger:
         
         new_text += "\n".join(temp_entries)
         
-        # Обновляем сообщение
+        # Обновляем сообщение с задержкой для избежания flood control
+        import asyncio
+        await asyncio.sleep(1)
         await self.notification_service.edit_message(
             self.user_id, 
             self.log_message.message_id, 
@@ -82,6 +117,47 @@ class NotificationService:
     def __init__(self, bot: Bot, db: BotDatabase):
         self.bot = bot
         self.db = db
+        self.max_message_length = 4000  # Лимит Telegram ~4096, оставляем запас
+    
+    async def send_long_message(self, user_id: int, message: str, parse_mode: str = "HTML") -> bool:
+        """Отправка длинного сообщения с разбивкой на части"""
+        if len(message) <= self.max_message_length:
+            return await self.send_message_to_user(user_id, message, parse_mode)
+        
+        # Разбиваем сообщение на части
+        parts = []
+        current_part = ""
+        
+        for line in message.split('\n'):
+            if len(current_part) + len(line) + 1 > self.max_message_length:
+                if current_part:
+                    parts.append(current_part)
+                    current_part = line + '\n'
+                else:
+                    # Если одна строка слишком длинная, обрезаем её
+                    parts.append(line[:self.max_message_length])
+            else:
+                current_part += line + '\n'
+        
+        if current_part:
+            parts.append(current_part)
+        
+        # Отправляем части по очереди
+        success = True
+        for i, part in enumerate(parts):
+            if i == 0:
+                result = await self.send_message_to_user(user_id, part, parse_mode)
+            else:
+                part_with_header = f"📊 <b>Продолжение ({i+1}/{len(parts)})</b>\n\n{part}"
+                result = await self.send_message_to_user(user_id, part_with_header, parse_mode)
+            
+            if not result:
+                success = False
+            
+            # Небольшая задержка между сообщениями
+            await asyncio.sleep(0.5)
+        
+        return success
     
     async def send_message_to_user(self, user_id: int, message: str, parse_mode: str = "HTML") -> bool:
         """Отправка сообщения конкретному пользователю"""
@@ -151,6 +227,9 @@ class NotificationService:
                     sent_count += 1
                     logging.info(f"Уведомление отправлено администратору {admin_id}")
                     
+                    # Задержка между сообщениями
+                    await asyncio.sleep(0.5)
+                    
                 except asyncio.TimeoutError:
                     logging.error(f"Таймаут отправки администратору {admin_id}")
                 except TelegramForbiddenError:
@@ -192,26 +271,13 @@ class NotificationService:
             for shop_name, shop_products in shops_products.items():
                 message_text = self._format_multiple_products_message(shop_name, shop_products)
                 
-                # Отправляем каждому администратору
+                # Отправляем каждому администратору с поддержкой длинных сообщений
                 for admin_id, _ in admins:
                     try:
-                        await asyncio.wait_for(
-                            self.bot.send_message(
-                                chat_id=admin_id,
-                                text=message_text,
-                                parse_mode="HTML",
-                                disable_web_page_preview=False
-                            ),
-                            timeout=30
-                        )
-                        sent_count += 1
+                        success = await self.send_long_message(admin_id, message_text)
+                        if success:
+                            sent_count += 1
                         
-                    except asyncio.TimeoutError:
-                        logging.error(f"Таймаут отправки администратору {admin_id}")
-                    except TelegramForbiddenError:
-                        logging.warning(f"Администратор {admin_id} заблокировал бота")
-                    except TelegramBadRequest as e:
-                        logging.error(f"Ошибка отправки администратору {admin_id}: {e}")
                     except Exception as e:
                         logging.error(f"Неожиданная ошибка при отправке администратору {admin_id}: {e}")
             
@@ -308,9 +374,6 @@ class NotificationService:
             
         except Exception as e:
             logging.error(f"Ошибка отправки уведомления о завершении парсинга: {e}")
-            return False           
-        except Exception as e:
-            logging.error(f"Ошибка отправки уведомлений о товарах: {e}")
             return False
     
     def _format_notification_message(self, product: Product) -> str:
@@ -327,7 +390,7 @@ class NotificationService:
         return message
     
     def _format_multiple_products_message(self, shop_name: str, products: List[Product]) -> str:
-        """Форматирование минимального сообщения о нескольких новых товарах"""
+        """Форматирование сообщения о нескольких новых товарах"""
         discovery_time = datetime.now().strftime("%d.%m.%Y %H:%M")
         
         message = f"""🆕 <b>Найдено {len(products)} новых товаров в {shop_name}</b>
@@ -336,13 +399,10 @@ class NotificationService:
 
 """
         
-        # Показываем максимум 5 товаров в минимальном формате
-        for i, product in enumerate(products[:5]):
+        # Показываем все товары, но с ограничением длины
+        for i, product in enumerate(products):
             title = product.title[:60] + '...' if len(product.title) > 60 else product.title
             message += f"• <a href='{product.url}'>{title}</a>\n"
-        
-        if len(products) > 5:
-            message += f"\n... и еще {len(products) - 5} товаров"
         
         return message
     
