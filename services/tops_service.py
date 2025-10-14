@@ -83,9 +83,13 @@ class TopsService:
                 
                 try:
                     first_dt = datetime.strptime(first_ts, "%d.%m.%Y_%H.%M")
+                    
+                    # Вычисляем разницу в месяцах и днях
+                    months_diff = (current_dt.year - first_dt.year) * 12 + (current_dt.month - first_dt.month)
                     days_diff = (current_dt.date() - first_dt.date()).days
                     
-                    if days_diff > 0:
+                    # Проверяем, прошло ли 2 месяца (включая дни)
+                    if months_diff >= 2:
                         first_data = snapshots.get(first_ts, {})
                         last_data = snapshots.get(last_ts, {})
                         url = last_data.get("url", "")
@@ -99,12 +103,12 @@ class TopsService:
                         likes_growth = likes_end - likes_start
                         
                         logging.info(
-                            f"Листинг {listing_id} отслеживается {days_diff} дн. "
+                            f"Листинг {listing_id} отслеживается {months_diff} мес. ({days_diff} дн.) "
                             f"(с {first_ts} до {current_date}) {url}"
                         )
                         
-                        # Проверяем условия для топа: +20 просмотров и +5 лайков
-                        if views_growth >= 20 and likes_growth >= 5:
+                        # Проверяем условия для топа: больше 1200 просмотров и 40+ лайков
+                        if views_end > 1200 and likes_end >= 40:
                             logging.info(
                                 f"🔥 ПОТЕНЦИАЛЬНЫЙ ТОП: {listing_id} | "
                                 f"Просмотры: +{views_growth} | Лайки: +{likes_growth} | {url}"
