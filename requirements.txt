@@ -12,12 +12,11 @@ openpyxl
 # Web scraping dependencies (existing)
 selenium==4.15.2
 selenium-stealth==1.0.6
-selenium-wire==5.1.0
 blinker==1.6.3
 beautifulsoup4==4.12.2
 requests==2.31.0
 lxml==4.9.3
-webdriver-manager==4.0.1
+certifi  # SSL сертификаты для PyInstaller
 
 # Google Sheets integration (existing)
 google-auth==2.23.4

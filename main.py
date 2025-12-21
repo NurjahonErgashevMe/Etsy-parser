@@ -10,6 +10,13 @@ from pathlib import Path
 # Добавляем корневую директорию в путь
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Настройка SSL сертификатов для PyInstaller (должно быть до любых HTTP запросов)
+try:
+    from utils.ssl_config import configure_ssl
+    configure_ssl()
+except ImportError:
+    pass  # В dev-режиме может быть не нужно
+
 # Импортируем обработчик ошибок если он существует
 try:
     import error_handler

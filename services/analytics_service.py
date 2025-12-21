@@ -84,7 +84,7 @@ class AnalyticsService:
             if listing_id not in data["listings"]:
                 data["listings"][listing_id] = {}
             
-            timestamps = sorted(data["listings"][listing_id].keys())
+            timestamps = sorted(data["listings"][listing_id].keys(), key=lambda x: datetime.strptime(x, "%d.%m.%Y_%H.%M"))
             
             # Если есть более 2 снимков, удаляем предпоследний
             if len(timestamps) >= 2:
@@ -157,7 +157,7 @@ class AnalyticsService:
             return []
         
         timestamps = list(data["listings"][listing_id].keys())
-        timestamps.sort()
+        timestamps.sort(key=lambda x: datetime.strptime(x, "%d.%m.%Y_%H.%M"))
         return timestamps
     
     def _check_listings_age(self, data: Dict, current_date: str):
@@ -169,7 +169,7 @@ class AnalyticsService:
                 if not snapshots:
                     continue
                 
-                timestamps = sorted(snapshots.keys())
+                timestamps = sorted(snapshots.keys(), key=lambda x: datetime.strptime(x, "%d.%m.%Y_%H.%M"))
                 first_ts = timestamps[0]
                 last_ts = timestamps[-1]
                 
@@ -241,7 +241,7 @@ class AnalyticsService:
         removed_count = 0
         
         for listing_id in data["listings"]:
-            timestamps = sorted(data["listings"][listing_id].keys())
+            timestamps = sorted(data["listings"][listing_id].keys(), key=lambda x: datetime.strptime(x, "%d.%m.%Y_%H.%M"))
             
             # Если есть более 2 снимков, удаляем все кроме первого и последнего
             if len(timestamps) > 2:
@@ -265,7 +265,7 @@ class AnalyticsService:
         report = []
         
         for listing_id, timestamps_data in data["listings"].items():
-            timestamps = sorted(timestamps_data.keys())
+            timestamps = sorted(timestamps_data.keys(), key=lambda x: datetime.strptime(x, "%d.%m.%Y_%H.%M"))
             
             if len(timestamps) < 2:
                 continue

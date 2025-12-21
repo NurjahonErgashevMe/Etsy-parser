@@ -77,24 +77,40 @@ class GoogleSheetsService:
             
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
+            try:
+                existing_urls = {
+                    value.strip()
+                    for value in worksheet.col_values(1)[1:]
+                    if value and value.strip()
+                }
+            except Exception:
+                existing_urls = set()
+            
             rows_to_add = []
             for listing_id, url in new_products.items():
+                if url in existing_urls:
+                    continue
+                
                 shop_name = get_shop_name_for_product(listing_id, url, results)
                 rows_to_add.append([url, current_time, shop_name])
+                existing_urls.add(url)
             
-            existing_data = worksheet.get_all_values()[1:]  
-            all_data = rows_to_add + existing_data
+            if not rows_to_add:
+                print("📊 Все найденные новинки уже есть в Google Sheets")
+                return
             
-            if all_data:
-                worksheet.batch_clear([f'A2:C{len(existing_data) + len(rows_to_add) + 1}'])
-                range_name = f'A2:C{len(all_data) + 1}'
-                worksheet.update(range_name, all_data)
-                
-                print(f"✅ Добавлено {len(rows_to_add)} новых товаров в Google Sheets (сверху)")
-                print(f"📊 Общее количество записей: {len(all_data)}")
-                
-                added_shops = set(row[2] for row in rows_to_add)
-                print(f"📊 Добавлены товары из магазинов: {', '.join(added_shops)}")
+            chunk_size = 100
+            for start in range(len(rows_to_add), 0, -chunk_size):
+                chunk = rows_to_add[max(0, start - chunk_size):start]
+                worksheet.insert_rows(
+                    chunk,
+                    row=2,
+                    value_input_option='USER_ENTERED'
+                )
+            
+            print(f"✅ Добавлено {len(rows_to_add)} новых товаров в Google Sheets (сверху)")
+            added_shops = {row[2] for row in rows_to_add}
+            print(f"📊 Добавлены товары из магазинов: {', '.join(added_shops)}")
             
         except Exception as e:
             print(f"❌ Ошибка при добавлении товаров в Google Sheets: {e}")

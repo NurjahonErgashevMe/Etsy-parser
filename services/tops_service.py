@@ -189,7 +189,6 @@ class TopsService:
 
 📈 <b>Дней наблюдения:</b> {summary['days_observed']}"""
         
-        return potential_tops
 
     def cleanup_perspective_from_tops(self) -> int:
         """Удаляет из new_perspective_listings.json листинги, которые уже есть в топах.

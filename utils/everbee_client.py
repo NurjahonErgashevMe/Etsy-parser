@@ -5,11 +5,13 @@ import json
 import logging
 import requests
 from typing import Optional, Dict, List
-from seleniumwire import webdriver
+from selenium import webdriver  # Обычный Selenium БЕЗ wire
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from utils.driver_path import get_chromedriver_path
 
 
 class EverBeeClient:
@@ -98,77 +100,166 @@ class EverBeeClient:
             return False
     
     def _authorize_and_get_token(self) -> Optional[str]:
-        """Авторизуется на EverBee и получает токен"""
+        """Авторизуется на EverBee и получает токен через CDP (БЕЗ selenium-wire)"""
         if not self.username or not self.password:
             logging.error("Не указаны EVERBEE_USERNAME или EVERBEE_PASSWORD в конфиге")
             return None
         
         chrome_options = Options()
-        # chrome_options.add_argument('--headless')
-        chrome_options.add_experimental_option("detach", True)
+        # chrome_options.add_argument('--headless=new')
         chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--disable-extensions')
+        chrome_options.add_argument('--disable-software-rasterizer')
+        
+        # КЛЮЧЕВОЕ: Инкогнито режим - не сохраняет кэш и куки
+        chrome_options.add_argument('--incognito')
+        
+        # Включаем логирование Performance для перехвата сетевых запросов
+        chrome_options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
         
         driver = None
-
         logging.info(f"Авторизация EverBee для пользователя: {self.username}")
         
         try:
-            driver = webdriver.Chrome(options=chrome_options)
+            # Используем локальный chromedriver (работает в exe и dev-режиме)
+            driver_path = get_chromedriver_path()
+            service = Service(executable_path=driver_path)
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+            driver.set_page_load_timeout(45)
+            driver.set_script_timeout(45)
+        
+            
+            # Включаем Network Domain для перехвата запросов через CDP
+            driver.execute_cdp_cmd('Network.enable', {})
+            
+            logging.info("Загружаем страницу авторизации...")
             driver.get(self.AUTH_URL)
             
-            wait = WebDriverWait(driver, 15)
+            wait = WebDriverWait(driver, 30)
+            
+            logging.info("Ищем поля формы...")
             email_field = wait.until(EC.presence_of_element_located((By.ID, "email")))
             password_field = driver.find_element(By.ID, "password")
             submit_btn = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
             
-            # Очищаем поля и заполняем
             import time
             from selenium.webdriver.common.keys import Keys
             
-            # Очищаем поле email и заполняем
+            logging.info("Заполняем форму...")
+            # Очищаем и заполняем email
             email_field.click()
             email_field.send_keys(Keys.CONTROL + "a")
             email_field.send_keys(Keys.DELETE)
             time.sleep(0.5)
             email_field.send_keys(self.username)
             
-            # Очищаем поле password и заполняем
+            # Очищаем и заполняем password
             password_field.click()
             password_field.send_keys(Keys.CONTROL + "a")
             password_field.send_keys(Keys.DELETE)
             time.sleep(0.5)
             password_field.send_keys(self.password)
             
-            # Пауза перед отправкой
             time.sleep(1)
             
+            logging.info("Отправляем форму...")
             submit_btn.click()
             
+            # Ждём редиректа после авторизации
+            logging.info("Ожидаем редиректа...")
             wait.until(lambda d: d.current_url != self.AUTH_URL)
             
-            for request in driver.requests:
-                if request.url == self.LOGIN_REQUEST_URL and request.method == 'POST':
-                    if request.response:
-                        response_body = request.response.body.decode('utf-8')
-                        response_data = json.loads(response_body)
-                        token = response_data.get('access_token')
-                        
-                        if token:
-                            logging.info("Токен EverBee получен")
-                            return token
+            logging.info("Авторизация прошла, собираем сетевые запросы...")
+            time.sleep(4)  # Даём время на завершение всех запросов
             
-            logging.error("Токен не найден в запросах")
+            # Извлекаем токен из логов Performance
+            logs = driver.get_log('performance')
+            logging.info(f"Получено {len(logs)} записей в логах Performance")
+            
+            for entry in logs:
+                try:
+                    log = json.loads(entry['message'])
+                    message = log.get('message', {})
+                    method = message.get('method')
+                    
+                    # Ищем ответы на сетевые запросы
+                    if method == 'Network.responseReceived':
+                        params = message.get('params', {})
+                        response = params.get('response', {})
+                        url = response.get('url', '')
+                        
+                        # Нашли нужный запрос к API авторизации
+                        if self.LOGIN_REQUEST_URL in url:
+                            logging.info(f"Найден запрос к {self.LOGIN_REQUEST_URL}")
+                            request_id = params['requestId']
+                            
+                            try:
+                                # Получаем тело ответа через CDP
+                                response_body = driver.execute_cdp_cmd(
+                                    'Network.getResponseBody', 
+                                    {'requestId': request_id}
+                                )
+                                
+                                body = response_body.get('body', '')
+                                
+                                # Пытаемся декодировать если base64
+                                if response_body.get('base64Encoded', False):
+                                    import base64
+                                    body = base64.b64decode(body).decode('utf-8')
+                                
+                                data = json.loads(body)
+                                token = data.get('access_token')
+                                
+                                if token:
+                                    logging.info("✅ Токен EverBee успешно получен через CDP")
+                                    return token
+                                    
+                            except Exception as e:
+                                logging.debug(f"Не удалось получить тело ответа для requestId={request_id}: {e}")
+                                continue
+                                
+                except Exception as e:
+                    logging.debug(f"Ошибка обработки лога: {e}")
+                    continue
+            
+            logging.error("❌ Токен не найден в логах браузера")
+            
+            # Дополнительная диагностика - показываем все найденные запросы к EverBee
+            logging.info("Найденные запросы к EverBee:")
+            for entry in logs[:50]:  # Показываем первые 50
+                try:
+                    log = json.loads(entry['message'])
+                    message = log.get('message', {})
+                    method = message.get('method')
+                    
+                    if method == 'Network.responseReceived':
+                        params = message.get('params', {})
+                        response = params.get('response', {})
+                        url = response.get('url', '')
+                        
+                        if 'everbee' in url.lower():
+                            status = response.get('status', 'unknown')
+                            logging.info(f"  - [{status}] {url}")
+                except:
+                    continue
+            
             return None
             
         except Exception as e:
-            logging.error(f"Ошибка авторизации EverBee: {e}")
+            logging.error(f"❌ Ошибка авторизации EverBee: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
             return None
             
         finally:
             if driver:
-                driver.quit()
+                try:
+                    driver.quit()
+                    logging.info("Браузер закрыт")
+                except Exception as e:
+                    logging.error(f"Ошибка закрытия драйвера: {e}")
     
     def ensure_token(self) -> bool:
         """Проверяет токен и получает новый при необходимости"""

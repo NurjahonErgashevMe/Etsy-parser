@@ -22,8 +22,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium_stealth import stealth
-from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.service import Service
+from utils.driver_path import get_chromedriver_path
 from utils.proxy_manager import ProxyManager
 
 class BrowserService:
@@ -202,30 +202,17 @@ class BrowserService:
             seleniumwire_options = None
         
         try:
-            logging.info("🔧 Устанавливаем ChromeDriver...")
+            # Используем локальный chromedriver (работает в exe и dev-режиме)
+            driver_path = get_chromedriver_path()
             
-            # Пытаемся установить ChromeDriver с обработкой ошибок
-            try:
-                driver_path = ChromeDriverManager().install()
-                logging.info(f"✅ ChromeDriver путь: {driver_path}")
-                
-                # Проверяем, что путь указывает на правильный файл
-                if not driver_path.endswith('chromedriver.exe'):
-                    # Ищем chromedriver.exe в той же папке
-                    driver_dir = os.path.dirname(driver_path)
-                    chromedriver_exe = os.path.join(driver_dir, 'chromedriver.exe')
-                    if os.path.exists(chromedriver_exe):
-                        driver_path = chromedriver_exe
-                        logging.info(f"🔧 Исправлен путь к ChromeDriver: {driver_path}")
-                    else:
-                        logging.error(f"❌ chromedriver.exe не найден в {driver_dir}")
-                        raise Exception("ChromeDriver executable not found")
-                
-                service = Service(driver_path)
-            except Exception as e:
-                logging.error(f"❌ Ошибка установки ChromeDriver: {e}")
-                logging.info("🔄 Пытаемся использовать системный ChromeDriver...")
-                service = Service()  # Попробуем системный драйвер
+            if not os.path.exists(driver_path):
+                logging.error(f"❌ ChromeDriver не найден: {driver_path}")
+                logging.error("💡 Скачайте chromedriver.exe и поместите в папку drivers/")
+                logging.error("💡 Ссылка: https://googlechromelabs.github.io/chrome-for-testing/")
+                return False
+            
+            logging.info(f"✅ ChromeDriver найден: {driver_path}")
+            service = Service(executable_path=driver_path)
             
             logging.info("🚀 Запускаем Chrome браузер...")
             
