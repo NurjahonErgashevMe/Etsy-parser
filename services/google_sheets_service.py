@@ -197,11 +197,22 @@ class GoogleSheetsService:
                     reviews
                 ])
             
+            # Get existing data and normalize to 10 columns
             existing_data = worksheet.get_all_values()[1:]
-            all_data = rows_to_add + existing_data
+            normalized_existing = []
+            for row in existing_data:
+                if len(row) < 10:
+                    # Pad with 0 for missing columns
+                    row = row + [0] * (10 - len(row))
+                elif len(row) > 10:
+                    # Trim to 10 columns
+                    row = row[:10]
+                normalized_existing.append(row)
+            
+            all_data = rows_to_add + normalized_existing
             
             if all_data:
-                worksheet.batch_clear([f'A2:J{len(existing_data) + len(rows_to_add) + 1}'])
+                worksheet.batch_clear([f'A2:J{len(all_data) + 1}'])
                 range_name = f'A2:J{len(all_data) + 1}'
                 worksheet.update(range_name, all_data)
                 
