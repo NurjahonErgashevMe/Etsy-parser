@@ -63,7 +63,7 @@ class EverBeeParser(BaseParser):
             try:
                 # Фильтруем по возрасту листинга (максимум 2 месяца)
                 listing_age = listing.get('listing_age_in_months', 0)
-                if listing_age > 2:
+                if listing_age >= 2:
                     continue
                     
                 product = self._parse_listing_data(listing, shop_name)

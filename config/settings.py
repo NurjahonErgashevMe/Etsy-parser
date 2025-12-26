@@ -57,6 +57,8 @@ class AppConfig:
         config_data = read_config_file()
         return config_data.get('google_sheets_spreadsheet_id', '1X6R-ocA3xgybcq-sXgzltW56JnyPNZ_N2hlZn6uX42g')
     
+    TRACKING_DAYS: int = 60  # Сколько дней отслеживаем листинг
+    
     scheduler_enabled: bool = True
     
     telegram_bot_enabled: bool = True

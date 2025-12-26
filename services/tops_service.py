@@ -77,7 +77,7 @@ class TopsService:
                 if not snapshots:
                     continue
                 
-                timestamps = sorted(snapshots.keys())
+                timestamps = sorted(snapshots.keys(), key=lambda x: datetime.strptime(x, "%d.%m.%Y_%H.%M"))
                 first_ts = timestamps[0]
                 last_ts = timestamps[-1]
                 
@@ -88,8 +88,14 @@ class TopsService:
                     months_diff = (current_dt.year - first_dt.year) * 12 + (current_dt.month - first_dt.month)
                     days_diff = (current_dt.date() - first_dt.date()).days
                     
-                    # Проверяем, прошло ли 2 месяца (включая дни)
-                    if months_diff >= 2:
+                    # Проверяем, прошло ли TRACKING_DAYS дней (включая дни)
+                    from config.settings import config
+                    tracking_days = config.TRACKING_DAYS
+                    
+                    # print(f"DEBUG: {listing_id} days_diff={days_diff} tracking_days={tracking_days}")
+                    
+                    # Если прошло больше или равно дней отслеживания
+                    if days_diff >= tracking_days:
                         first_data = snapshots.get(first_ts, {})
                         last_data = snapshots.get(last_ts, {})
                         url = last_data.get("url", "")
@@ -102,8 +108,14 @@ class TopsService:
                         views_growth = views_end - views_start
                         likes_growth = likes_end - likes_start
                         
+                        # Вычисляем средний прирост в день
+                        # Используем days_diff, но если он 0 (что странно), то 1, чтобы не делить на 0
+                        divisor = days_diff if days_diff > 0 else 1
+                        views_daily = round(views_growth / divisor, 2)
+                        likes_daily = round(likes_growth / divisor, 2)
+                        
                         logging.info(
-                            f"Листинг {listing_id} отслеживается {months_diff} мес. ({days_diff} дн.) "
+                            f"Листинг {listing_id} отслеживается {days_diff} дн. "
                             f"(с {first_ts} до {current_date}) {url}"
                         )
                         
@@ -111,7 +123,7 @@ class TopsService:
                         if views_end > 1200 and likes_end >= 40:
                             logging.info(
                                 f"🔥 ПОТЕНЦИАЛЬНЫЙ ТОП: {listing_id} | "
-                                f"Просмотры: +{views_growth} | Лайки: +{likes_growth} | {url}"
+                                f"Просмотры: +{views_growth} ({views_daily}/день) | Лайки: +{likes_growth} ({likes_daily}/день) | {url}"
                             )
                             
                             # Сохраняем в топы
@@ -122,8 +134,10 @@ class TopsService:
                                 "became_hit_at": last_ts,
                                 "views_start": views_start,
                                 "views_hit": views_end,
+                                "views_daily_growth": views_daily,
                                 "likes_start": likes_start,
                                 "likes_hit": likes_end,
+                                "likes_daily_growth": likes_daily,
                                 "reviews": last_data.get("est_reviews", 0),
                                 "days_observed": days_diff
                             }

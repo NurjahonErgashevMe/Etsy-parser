@@ -131,17 +131,25 @@ class GoogleSheetsService:
             
             try:
                 worksheet = spreadsheet.worksheet(sheet_name)
+                # Ensure we have enough columns (10)
+                try:
+                    if worksheet.col_count < 10:
+                        worksheet.resize(cols=10)
+                except:
+                    pass
             except gspread.WorksheetNotFound:
                 print(f"📊 Создание нового листа '{sheet_name}'...")
-                worksheet = spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=8)
-                worksheet.update('A1:H1', [[
+                worksheet = spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=10)
+                worksheet.update('A1:J1', [[
                     'Ссылка на товар',
                     'Когда появился',
                     'Когда стал хитом',
                     'Просмотры (начало)',
-                    'Просмотры (хит)',
+                    'Просмотры (на 60 день)',
+                    'Просмотры (хит/день)',
                     'Лайки (начало)',
-                    'Лайки (хит)',
+                    'Лайки (на 60 день)',
+                    'Лайки (хит/день)',
                     'Отзывы'
                 ]])
             
@@ -155,23 +163,46 @@ class GoogleSheetsService:
                     except:
                         return date_str
                 
+                # Приводим к числовым типам для корректной сортировки в Google Sheets
+                try:
+                    views_start = int(data.get('views_start', 0))
+                    views_hit = int(data.get('views_hit', 0))
+                    views_daily = float(data.get('views_daily_growth', 0.0))
+                    
+                    likes_start = int(data.get('likes_start', 0))
+                    likes_hit = int(data.get('likes_hit', 0))
+                    likes_daily = float(data.get('likes_daily_growth', 0.0))
+                    
+                    reviews = int(data.get('reviews', 0))
+                except (ValueError, TypeError):
+                    # Fallback если вдруг пришли плохие данные
+                    views_start = data.get('views_start', 0)
+                    views_hit = data.get('views_hit', 0)
+                    views_daily = data.get('views_daily_growth', 0)
+                    likes_start = data.get('likes_start', 0)
+                    likes_hit = data.get('likes_hit', 0)
+                    likes_daily = data.get('likes_daily_growth', 0)
+                    reviews = data.get('reviews', 0)
+
                 rows_to_add.append([
                     data['url'],
                     convert_date(data['discovered_at']),
                     convert_date(data['became_hit_at']),
-                    data['views_start'],
-                    data['views_hit'],
-                    data['likes_start'],
-                    data['likes_hit'],
-                    data['reviews']
+                    views_start,
+                    views_hit,
+                    views_daily,
+                    likes_start,
+                    likes_hit,
+                    likes_daily,
+                    reviews
                 ])
             
             existing_data = worksheet.get_all_values()[1:]
             all_data = rows_to_add + existing_data
             
             if all_data:
-                worksheet.batch_clear([f'A2:H{len(existing_data) + len(rows_to_add) + 1}'])
-                range_name = f'A2:H{len(all_data) + 1}'
+                worksheet.batch_clear([f'A2:J{len(existing_data) + len(rows_to_add) + 1}'])
+                range_name = f'A2:J{len(all_data) + 1}'
                 worksheet.update(range_name, all_data)
                 
                 print(f"✅ Добавлено {len(rows_to_add)} топ-хитов в Google Sheets (сверху)")
