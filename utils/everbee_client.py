@@ -112,6 +112,17 @@ class EverBeeClient:
         chrome_options.add_argument('--disable-dev-shm-usage')
         chrome_options.add_argument('--disable-extensions')
         chrome_options.add_argument('--disable-software-rasterizer')
+        chrome_options.add_argument('--disable-setuid-sandbox')
+        chrome_options.add_argument('--disable-background-timer-throttling')
+        chrome_options.add_argument('--disable-renderer-backgrounding')
+        chrome_options.add_argument('--disable-backgrounding-occluded-windows')
+        
+        # Отключаем загрузку изображений для ускорения
+        prefs = {
+            'profile.managed_default_content_settings.images': 2,
+            'profile.default_content_setting_values.notifications': 2
+        }
+        chrome_options.add_experimental_option('prefs', prefs)
         
         # КЛЮЧЕВОЕ: Инкогнито режим - не сохраняет кэш и куки
         chrome_options.add_argument('--incognito')
@@ -127,8 +138,8 @@ class EverBeeClient:
             driver_path = get_chromedriver_path()
             service = Service(executable_path=driver_path)
             driver = webdriver.Chrome(service=service, options=chrome_options)
-            driver.set_page_load_timeout(45)
-            driver.set_script_timeout(45)
+            driver.set_page_load_timeout(90)  # Увеличен с 45 до 90 секунд
+            driver.set_script_timeout(90)  # Увеличен с 45 до 90 секунд
         
             
             # Включаем Network Domain для перехвата запросов через CDP
@@ -137,7 +148,7 @@ class EverBeeClient:
             logging.info("Загружаем страницу авторизации...")
             driver.get(self.AUTH_URL)
             
-            wait = WebDriverWait(driver, 30)
+            wait = WebDriverWait(driver, 60)  # Увеличен с 30 до 60 секунд
             
             logging.info("Ищем поля формы...")
             email_field = wait.until(EC.presence_of_element_located((By.ID, "email")))
@@ -167,9 +178,9 @@ class EverBeeClient:
             logging.info("Отправляем форму...")
             submit_btn.click()
             
-            # Ждём редиректа после авторизации
+            # Ждём редиректа после авторизации с увеличенным таймаутом
             logging.info("Ожидаем редиректа...")
-            wait.until(lambda d: d.current_url != self.AUTH_URL)
+            WebDriverWait(driver, 60).until(lambda d: d.current_url != self.AUTH_URL)
             
             logging.info("Авторизация прошла, собираем сетевые запросы...")
             time.sleep(4)  # Даём время на завершение всех запросов

@@ -163,26 +163,28 @@ class GoogleSheetsService:
                     except:
                         return date_str
                 
-                # Приводим к числовым типам для корректной сортировки в Google Sheets
-                try:
-                    views_start = int(data.get('views_start', 0))
-                    views_hit = int(data.get('views_hit', 0))
-                    views_daily = float(data.get('views_daily_growth', 0.0))
-                    
-                    likes_start = int(data.get('likes_start', 0))
-                    likes_hit = int(data.get('likes_hit', 0))
-                    likes_daily = float(data.get('likes_daily_growth', 0.0))
-                    
-                    reviews = int(data.get('reviews', 0))
-                except (ValueError, TypeError):
-                    # Fallback если вдруг пришли плохие данные
-                    views_start = data.get('views_start', 0)
-                    views_hit = data.get('views_hit', 0)
-                    views_daily = data.get('views_daily_growth', 0)
-                    likes_start = data.get('likes_start', 0)
-                    likes_hit = data.get('likes_hit', 0)
-                    likes_daily = data.get('likes_daily_growth', 0)
-                    reviews = data.get('reviews', 0)
+                # Принудительно конвертируем в числа (убираем апострофы и строки)
+                def to_int(val):
+                    try:
+                        return int(str(val).replace("'", "").strip())
+                    except:
+                        return 0
+                
+                def to_float(val):
+                    try:
+                        return float(str(val).replace("'", "").strip())
+                    except:
+                        return 0.0
+                
+                views_start = to_int(data.get('views_start', 0))
+                views_hit = to_int(data.get('views_hit', 0))
+                views_daily = to_float(data.get('views_daily_growth', 0.0))
+                
+                likes_start = to_int(data.get('likes_start', 0))
+                likes_hit = to_int(data.get('likes_hit', 0))
+                likes_daily = to_float(data.get('likes_daily_growth', 0.0))
+                
+                reviews = to_int(data.get('reviews', 0))
 
                 rows_to_add.append([
                     data['url'],
